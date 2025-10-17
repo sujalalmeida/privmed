@@ -1,0 +1,357 @@
+age,gender,blood_type,discomfort_level,symptom_duration,prior_conditions,bmi,smoker_status,heart_rate,bp_sys,bp_dia,cholesterol,glucose,family_history,medication_use,disease_label
+25,Female,O+,3,2,None,22.5,No,72,120,80,180,95,No,No,0
+31,Male,A-,0,0,None,24.1,No,68,122,81,190,85,No,No,0
+42,Female,B+,1,1,None,23.3,No,75,115,75,188,91,No,No,0
+28,Male,AB+,0,0,None,21.9,No,66,114,74,182,90,No,No,0
+35,Female,O-,1,2,None,22.8,No,71,118,78,185,92,No,No,0
+49,Male,A+,2,3,None,25.0,Yes,80,125,84,205,98,No,Yes,0
+65,Male,A+,7,20,Diabetes,30.1,Yes,85,145,92,230,160,Yes,Yes,1
+58,Female,B+,6,15,Diabetes,32.5,No,82,140,88,215,175,Yes,Yes,1
+70,Male,O-,8,25,Hypertension,33.0,Yes,90,150,95,240,180,Yes,Yes,1
+55,Female,A-,5,18,None,29.8,Yes,78,138,85,225,155,No,Yes,1
+62,Male,O+,7,22,Diabetes,31.5,No,88,142,90,235,165,Yes,Yes,1
+68,Male,A+,5,15,Hypertension,28.9,Yes,84,155,98,245,110,Yes,Yes,2
+72,Female,O-,6,20,Hypertension,31.2,No,88,160,102,255,120,Yes,Yes,2
+59,Male,B+,4,10,None,27.5,Yes,80,148,95,230,105,No,Yes,2
+76,Female,AB+,7,18,Hypertension,30.5,Yes,92,165,105,260,125,Yes,Yes,2
+61,Male,O+,5,12,None,29.3,No,82,152,96,238,115,Yes,Yes,2
+75,Male,A-,9,25,Heart Disease,29.5,Yes,95,160,94,260,120,Yes,Yes,3
+69,Female,O+,10,30,Hypertension,28.0,Yes,100,155,90,275,130,Yes,Yes,3
+80,Male,B-,8,28,Heart Disease,27.2,No,92,150,88,250,115,Yes,Yes,3
+71,Female,A+,9,26,Diabetes,30.1,Yes,98,162,96,280,140,Yes,Yes,3
+78,Male,O-,9,29,Heart Disease,28.8,Yes,96,158,92,265,125,No,Yes,3
+22,Female,O+,0,0,None,20.5,No,70,108,68,170,86,No,No,0
+41,Male,A+,1,2,None,23.8,No,74,120,80,192,94,No,No,0
+33,Female,B-,0,1,None,22.1,No,69,112,72,180,89,No,No,0
+49,Male,O-,1,3,None,24.5,Yes,78,124,82,200,96,No,Yes,0
+28,Female,A-,0,0,None,21.9,No,66,114,74,182,90,No,No,0
+56,Male,O+,5,16,Diabetes,31.8,Yes,81,139,89,220,170,Yes,Yes,1
+63,Female,AB-,6,21,Diabetes,33.2,No,85,144,91,228,178,Yes,Yes,1
+69,Male,A+,7,23,Hypertension,32.7,Yes,89,148,93,238,182,Yes,Yes,1
+51,Female,B+,4,17,None,30.3,No,79,136,86,222,158,No,Yes,1
+66,Male,O-,5,19,Diabetes,31.0,Yes,86,141,88,232,168,Yes,Yes,1
+68,Male,A-,5,14,Hypertension,28.2,Yes,83,153,97,242,112,Yes,Yes,2
+74,Female,O+,6,19,Hypertension,30.8,No,87,158,100,252,122,Yes,Yes,2
+61,Male,B-,3,11,None,27.9,Yes,81,150,96,234,108,No,Yes,2
+79,Female,A+,5,17,Hypertension,29.9,Yes,90,163,103,258,128,Yes,Yes,2
+63,Male,O-,4,13,None,29.0,No,83,151,95,236,118,Yes,Yes,2
+77,Male,A+,9,27,Heart Disease,29.1,Yes,96,161,95,262,122,Yes,Yes,3
+70,Female,O-,8,28,Hypertension,28.3,Yes,102,157,91,278,132,Yes,Yes,3
+82,Male,B+,7,29,Heart Disease,27.5,No,93,152,89,254,118,Yes,Yes,3
+73,Female,AB-,9,25,Diabetes,30.4,Yes,99,164,98,282,142,Yes,Yes,3
+80,Male,O+,8,30,Heart Disease,28.6,Yes,97,159,93,268,128,No,Yes,3
+42,Female,A-,1,2,None,22.7,No,76,119,79,186,93,No,No,0
+29,Male,O+,0,1,None,24.3,No,67,121,80,191,87,No,No,0
+24,Female,B+,0,0,None,21.1,No,71,109,69,174,87,No,No,0
+54,Male,AB-,2,3,None,25.2,Yes,81,126,85,206,99,No,Yes,0
+37,Female,O-,1,1,None,23.4,No,64,116,76,189,92,No,No,0
+67,Male,A+,6,21,Diabetes,30.3,Yes,86,146,93,231,162,Yes,Yes,1
+60,Female,B-,5,16,Diabetes,32.7,No,83,141,89,216,177,Yes,Yes,1
+71,Male,O+,7,26,Hypertension,33.2,Yes,91,151,96,241,181,Yes,Yes,1
+57,Female,A-,4,19,None,30.0,Yes,80,139,87,226,157,No,Yes,1
+64,Male,O-,6,23,Diabetes,31.7,No,89,143,91,236,167,Yes,Yes,1
+66,Male,A+,4,16,Hypertension,29.1,Yes,85,156,99,246,111,Yes,Yes,2
+75,Female,O-,5,21,Hypertension,31.4,No,89,161,103,256,121,Yes,Yes,2
+59,Male,B+,3,12,None,27.7,Yes,79,149,94,232,107,No,Yes,2
+78,Female,AB-,6,19,Hypertension,30.7,Yes,93,166,106,261,126,Yes,Yes,2
+62,Male,O+,4,14,None,29.5,No,81,153,97,239,117,Yes,Yes,2
+76,Male,A-,8,26,Heart Disease,29.7,Yes,94,159,93,259,119,Yes,Yes,3
+69,Female,O+,9,29,Hypertension,28.2,Yes,101,156,92,276,131,Yes,Yes,3
+81,Male,B-,7,27,Heart Disease,27.4,No,91,151,87,252,117,Yes,Yes,3
+72,Female,A+,9,27,Diabetes,30.3,Yes,97,163,97,281,139,Yes,Yes,3
+79,Male,O-,8,28,Heart Disease,28.9,Yes,95,157,91,266,127,No,Yes,3
+26,Female,O-,0,0,None,20.7,No,72,110,70,172,85,No,No,0
+43,Male,A+,1,2,None,24.0,No,75,122,81,194,95,No,No,0
+31,Female,B+,0,1,None,22.3,No,68,113,73,181,88,No,No,0
+50,Male,O-,1,3,None,24.7,Yes,79,123,83,198,97,No,Yes,0
+35,Female,A-,0,0,None,21.7,No,67,115,75,183,89,No,No,0
+57,Male,O+,5,17,Diabetes,32.0,Yes,82,140,90,221,171,Yes,Yes,1
+64,Female,AB+,6,22,Diabetes,33.4,No,86,145,92,229,179,Yes,Yes,1
+70,Male,A-,7,24,Hypertension,32.9,Yes,90,149,94,239,183,Yes,Yes,1
+53,Female,B-,4,16,None,30.5,No,81,137,88,223,159,No,Yes,1
+67,Male,O+,5,20,Diabetes,31.2,Yes,87,142,89,233,169,Yes,Yes,1
+70,Male,A-,5,15,Hypertension,28.4,Yes,84,154,98,243,113,Yes,Yes,2
+76,Female,O+,6,20,Hypertension,31.0,No,88,159,101,253,123,Yes,Yes,2
+62,Male,B-,3,13,None,28.1,Yes,82,151,97,235,109,No,Yes,2
+81,Female,A+,5,18,Hypertension,30.1,Yes,91,164,104,259,129,Yes,Yes,2
+64,Male,O-,4,11,None,29.2,No,84,152,96,237,119,Yes,Yes,2
+78,Male,A+,9,28,Heart Disease,29.3,Yes,97,162,96,263,123,Yes,Yes,3
+71,Female,O-,8,27,Hypertension,28.5,Yes,103,158,93,279,133,Yes,Yes,3
+83,Male,B+,7,30,Heart Disease,27.7,No,94,153,90,255,119,Yes,Yes,3
+74,Female,AB-,9,24,Diabetes,30.6,Yes,100,165,99,283,143,Yes,Yes,3
+82,Male,O+,8,29,Heart Disease,28.4,Yes,98,160,94,269,129,No,Yes,3
+46,Female,A-,1,2,None,22.6,No,77,120,78,187,94,No,No,0
+32,Male,O+,0,1,None,24.2,No,69,123,82,193,86,No,No,0
+27,Female,B+,0,0,None,21.5,No,73,111,71,176,86,No,No,0
+55,Male,AB-,2,3,None,25.1,Yes,82,127,86,207,100,No,Yes,0
+39,Female,O-,1,1,None,23.6,No,65,117,77,190,93,No,No,0
+66,Male,A+,6,22,Diabetes,30.5,Yes,87,147,94,233,163,Yes,Yes,1
+59,Female,B-,5,17,Diabetes,32.9,No,84,142,90,217,176,Yes,Yes,1
+72,Male,O+,7,27,Hypertension,33.4,Yes,92,152,97,243,184,Yes,Yes,1
+56,Female,A-,4,20,None,30.2,Yes,79,140,88,227,156,No,Yes,1
+65,Male,O-,6,24,Diabetes,31.9,No,90,144,92,237,166,Yes,Yes,1
+67,Male,A+,4,17,Hypertension,29.3,Yes,86,157,100,247,114,Yes,Yes,2
+74,Female,O-,5,22,Hypertension,31.6,No,90,162,104,257,124,Yes,Yes,2
+60,Male,B+,3,14,None,27.9,Yes,80,150,95,233,110,No,Yes,2
+79,Female,AB-,6,20,Hypertension,30.9,Yes,94,167,107,263,127,Yes,Yes,2
+63,Male,O+,4,15,None,29.7,No,82,154,98,240,116,Yes,Yes,2
+77,Male,A-,8,25,Heart Disease,29.9,Yes,95,160,94,260,121,Yes,Yes,3
+70,Female,O+,9,30,Hypertension,28.4,Yes,102,157,91,277,132,Yes,Yes,3
+82,Male,B-,7,28,Heart Disease,27.6,No,92,152,88,253,118,Yes,Yes,3
+73,Female,A+,9,26,Diabetes,30.5,Yes,98,164,98,282,141,Yes,Yes,3
+80,Male,O-,8,29,Heart Disease,29.1,Yes,96,158,92,267,126,No,Yes,3
+23,Female,O-,0,0,None,20.6,No,71,109,69,171,84,No,No,0
+44,Male,A+,1,2,None,24.1,No,76,121,80,195,96,No,No,0
+34,Female,B+,0,1,None,22.4,No,70,114,74,182,89,No,No,0
+51,Male,O-,1,3,None,24.9,Yes,80,125,84,199,98,No,Yes,0
+36,Female,A-,0,0,None,21.8,No,68,116,76,184,91,No,No,0
+58,Male,O+,5,18,Diabetes,32.2,Yes,83,141,91,222,172,Yes,Yes,1
+65,Female,AB-,6,23,Diabetes,33.6,No,87,146,93,230,180,Yes,Yes,1
+70,Male,A+,7,25,Hypertension,33.1,Yes,91,150,95,240,185,Yes,Yes,1
+54,Female,B-,4,17,None,30.7,No,82,138,89,224,160,No,Yes,1
+68,Male,O+,5,21,Diabetes,31.4,Yes,88,143,90,234,170,Yes,Yes,1
+71,Male,A-,5,16,Hypertension,28.6,Yes,85,155,99,244,115,Yes,Yes,2
+77,Female,O+,6,21,Hypertension,31.2,No,89,160,102,254,125,Yes,Yes,2
+63,Male,B-,3,12,None,28.3,Yes,83,152,98,236,111,No,Yes,2
+80,Female,A+,5,19,Hypertension,30.3,Yes,92,165,105,260,130,Yes,Yes,2
+65,Male,O-,4,13,None,29.4,No,85,153,97,238,120,Yes,Yes,2
+79,Male,A+,9,27,Heart Disease,29.5,Yes,98,163,97,264,124,Yes,Yes,3
+72,Female,O-,8,28,Hypertension,28.7,Yes,104,159,94,280,134,Yes,Yes,3
+84,Male,B+,7,29,Heart Disease,27.9,No,95,154,91,256,120,Yes,Yes,3
+75,Female,AB-,9,25,Diabetes,30.8,Yes,101,166,100,284,144,Yes,Yes,3
+81,Male,O+,8,30,Heart Disease,28.5,Yes,99,161,95,270,130,No,Yes,3
+40,Male,O-,1,1,None,26.1,No,72,123,81,194,93,No,No,0
+29,Female,A+,0,0,None,21.0,No,71,113,73,178,88,No,No,0
+47,Male,B-,1,2,None,25.8,No,75,126,83,204,98,No,No,0
+36,Female,AB+,0,0,None,22.8,No,68,116,76,183,90,No,No,0
+52,Male,O-,2,4,None,27.0,Yes,78,130,85,212,102,Yes,Yes,0
+63,Female,A+,5,19,Diabetes,31.2,Yes,83,142,90,223,164,Yes,Yes,1
+59,Male,O-,4,14,Diabetes,33.5,No,80,138,87,214,173,Yes,Yes,1
+71,Female,B+,6,24,Hypertension,34.0,Yes,88,149,94,237,183,Yes,Yes,1
+54,Male,A-,3,15,None,30.8,No,78,136,86,219,158,No,Yes,1
+68,Female,O+,5,22,Diabetes,32.4,Yes,85,145,91,230,172,Yes,Yes,1
+70,Male,B-,4,18,Hypertension,29.9,Yes,82,158,100,250,118,Yes,Yes,2
+75,Female,A+,6,22,Hypertension,32.1,No,87,163,103,260,127,Yes,Yes,2
+61,Male,O-,3,13,None,28.7,Yes,79,152,96,238,112,No,Yes,2
+78,Female,AB+,5,20,Hypertension,31.5,Yes,90,168,107,268,133,Yes,Yes,2
+65,Male,A-,4,16,None,30.1,No,81,155,98,243,121,Yes,Yes,2
+79,Female,O+,8,27,Heart Disease,30.3,Yes,96,161,95,263,124,Yes,Yes,3
+72,Male,B-,9,29,Hypertension,28.9,Yes,101,159,93,280,135,Yes,Yes,3
+81,Female,A+,7,26,Heart Disease,28.0,No,93,153,89,258,122,Yes,Yes,3
+74,Male,O-,9,28,Diabetes,31.0,Yes,99,165,99,285,145,Yes,Yes,3
+83,Female,B+,8,30,Heart Disease,29.2,Yes,97,160,94,272,131,No,Yes,3
+48,Female,O-,1,3,None,24.8,No,78,124,82,198,97,No,No,0
+33,Male,A+,0,1,None,23.1,No,70,118,78,187,91,No,No,0
+26,Female,B-,0,0,None,21.6,No,72,112,72,177,87,No,No,0
+51,Male,AB+,2,3,None,26.5,Yes,79,128,84,208,100,No,Yes,0
+39,Female,O-,0,1,None,22.4,No,67,115,75,185,92,No,No,0
+61,Male,A+,6,20,Diabetes,31.8,Yes,85,144,92,228,168,Yes,Yes,1
+68,Female,B-,5,18,Diabetes,34.2,No,84,141,89,220,178,Yes,Yes,1
+73,Male,O+,7,26,Hypertension,34.6,Yes,90,152,96,242,187,Yes,Yes,1
+57,Female,A-,4,17,None,31.4,Yes,81,139,88,224,161,No,Yes,1
+66,Male,O-,6,23,Diabetes,32.9,No,88,147,93,235,175,Yes,Yes,1
+72,Male,A+,4,19,Hypertension,30.4,Yes,86,160,101,253,120,Yes,Yes,2
+77,Female,O-,6,23,Hypertension,32.5,No,90,165,104,263,129,Yes,Yes,2
+62,Male,B+,3,15,None,29.1,Yes,81,154,97,241,114,No,Yes,2
+80,Female,AB-,5,21,Hypertension,31.9,Yes,92,170,108,271,135,Yes,Yes,2
+67,Male,O+,4,17,None,30.5,No,83,157,99,245,123,Yes,Yes,2
+80,Female,A-,8,28,Heart Disease,30.6,Yes,97,162,96,265,126,Yes,Yes,3
+73,Male,O+,9,30,Hypertension,29.1,Yes,103,160,94,282,137,Yes,Yes,3
+82,Female,B-,7,27,Heart Disease,28.3,No,94,155,90,260,124,Yes,Yes,3
+75,Male,A+,9,29,Diabetes,31.3,Yes,100,167,100,287,147,Yes,Yes,3
+84,Female,O-,8,29,Heart Disease,29.4,Yes,98,162,95,274,133,No,Yes,3
+45,Male,O+,1,2,None,25.5,No,74,121,80,192,95,No,No,0
+30,Female,A-,0,0,None,22.2,No,69,114,74,180,89,No,No,0
+49,Male,B+,1,3,None,26.2,Yes,77,127,84,206,99,No,Yes,0
+34,Female,AB-,0,0,None,22.0,No,67,115,75,182,90,No,No,0
+55,Male,O-,2,5,None,27.8,Yes,80,132,87,215,105,Yes,Yes,0
+64,Female,A+,5,21,Diabetes,32.2,Yes,84,143,91,225,166,Yes,Yes,1
+60,Male,O-,4,16,Diabetes,33.8,No,81,139,88,216,175,Yes,Yes,1
+72,Female,B+,6,25,Hypertension,34.3,Yes,89,150,95,239,185,Yes,Yes,1
+55,Male,A-,3,16,None,31.1,No,79,137,87,221,160,No,Yes,1
+69,Female,O+,5,23,Diabetes,32.7,Yes,86,146,92,232,174,Yes,Yes,1
+71,Male,B-,4,20,Hypertension,30.2,Yes,83,159,101,252,119,Yes,Yes,2
+76,Female,A+,6,24,Hypertension,32.3,No,88,164,104,262,128,Yes,Yes,2
+62,Male,O-,3,14,None,28.9,Yes,80,153,96,240,113,No,Yes,2
+79,Female,AB+,5,22,Hypertension,31.7,Yes,91,169,108,270,134,Yes,Yes,2
+66,Male,A-,4,18,None,30.3,No,82,156,99,244,122,Yes,Yes,2
+78,Female,O+,8,26,Heart Disease,30.4,Yes,95,160,94,264,125,Yes,Yes,3
+71,Male,B-,9,28,Hypertension,29.0,Yes,102,158,92,281,136,Yes,Yes,3
+80,Female,A+,7,28,Heart Disease,28.1,No,92,154,89,259,123,Yes,Yes,3
+73,Male,O-,9,27,Diabetes,31.1,Yes,98,166,99,286,146,Yes,Yes,3
+82,Female,B+,8,30,Heart Disease,29.3,Yes,96,161,94,273,132,No,Yes,3
+42,Male,O-,1,1,None,25.0,No,73,120,79,190,94,No,No,0
+28,Female,A+,0,0,None,21.4,No,70,112,72,176,87,No,No,0
+46,Male,B-,1,2,None,25.9,No,76,125,82,202,97,No,No,0
+35,Female,AB+,0,0,None,22.6,No,69,117,77,184,91,No,No,0
+53,Male,O-,2,4,None,27.3,Yes,77,129,86,210,103,Yes,Yes,0
+62,Female,A+,5,20,Diabetes,31.5,Yes,82,141,89,222,165,Yes,Yes,1
+58,Male,O-,4,15,Diabetes,33.2,No,79,137,86,213,174,Yes,Yes,1
+70,Female,B+,6,23,Hypertension,33.7,Yes,87,148,93,236,184,Yes,Yes,1
+53,Male,A-,3,14,None,30.5,No,77,135,85,218,157,No,Yes,1
+67,Female,O+,5,21,Diabetes,32.1,Yes,84,144,90,229,171,Yes,Yes,1
+70,Male,B-,4,17,Hypertension,29.6,Yes,81,157,99,248,116,Yes,Yes,2
+74,Female,A+,6,21,Hypertension,31.8,No,86,162,102,258,126,Yes,Yes,2
+60,Male,O-,3,12,None,28.4,Yes,78,151,95,237,111,No,Yes,2
+77,Female,AB+,5,19,Hypertension,31.2,Yes,89,167,106,267,132,Yes,Yes,2
+64,Male,A-,4,15,None,29.8,No,80,154,97,242,120,Yes,Yes,2
+77,Female,O+,8,25,Heart Disease,30.0,Yes,94,159,93,262,123,Yes,Yes,3
+70,Male,B-,9,27,Hypertension,28.7,Yes,100,157,91,279,134,Yes,Yes,3
+79,Female,A+,7,26,Heart Disease,27.8,No,91,152,88,257,121,Yes,Yes,3
+72,Male,O-,9,26,Diabetes,30.7,Yes,97,164,98,284,144,Yes,Yes,3
+81,Female,B+,8,29,Heart Disease,29.0,Yes,95,159,93,271,130,No,Yes,3
+44,Female,O-,1,2,None,24.4,No,76,122,81,196,96,No,No,0
+31,Male,A+,0,1,None,22.9,No,68,116,76,184,90,No,No,0
+25,Female,B-,0,0,None,21.2,No,71,111,71,175,86,No,No,0
+50,Male,AB+,2,3,None,26.8,Yes,78,126,83,205,99,No,Yes,0
+38,Female,O-,0,1,None,22.7,No,66,114,74,183,91,No,No,0
+60,Male,A+,6,19,Diabetes,31.1,Yes,86,143,91,226,167,Yes,Yes,1
+67,Female,B-,5,17,Diabetes,33.5,No,83,140,88,218,177,Yes,Yes,1
+72,Male,O+,7,25,Hypertension,33.9,Yes,89,151,95,240,186,Yes,Yes,1
+56,Female,A-,4,16,None,31.0,Yes,80,138,87,222,159,No,Yes,1
+65,Male,O-,6,22,Diabetes,32.5,No,87,146,92,233,173,Yes,Yes,1
+73,Male,A+,4,20,Hypertension,30.0,Yes,85,159,100,251,118,Yes,Yes,2
+78,Female,O-,6,25,Hypertension,32.8,No,91,166,105,265,131,Yes,Yes,2
+63,Male,B+,3,16,None,29.4,Yes,82,155,98,243,115,No,Yes,2
+81,Female,AB-,5,23,Hypertension,32.2,Yes,93,171,109,273,137,Yes,Yes,2
+68,Male,O+,4,19,None,30.8,No,84,158,100,247,125,Yes,Yes,2
+81,Female,A-,8,29,Heart Disease,30.9,Yes,98,163,97,267,128,Yes,Yes,3
+74,Male,O+,9,29,Hypertension,29.3,Yes,104,161,95,284,139,Yes,Yes,3
+83,Female,B-,7,28,Heart Disease,28.5,No,95,156,91,262,126,Yes,Yes,3
+76,Male,A+,9,30,Diabetes,31.5,Yes,101,168,101,289,149,Yes,Yes,3
+85,Female,O-,8,30,Heart Disease,29.6,Yes,99,163,96,276,135,No,Yes,3
+41,Male,O-,1,1,None,24.6,No,72,119,78,188,93,No,No,0
+27,Female,A+,0,0,None,20.9,No,70,110,70,174,86,No,No,0
+47,Male,B-,1,2,None,25.4,No,74,124,81,200,96,No,No,0
+33,Female,AB+,0,0,None,22.3,No,68,113,73,180,89,No,No,0
+54,Male,O-,2,4,None,27.5,Yes,79,131,86,213,104,Yes,Yes,0
+65,Female,A+,5,22,Diabetes,31.9,Yes,85,145,92,227,169,Yes,Yes,1
+61,Male,O-,4,17,Diabetes,34.1,No,82,140,88,219,178,Yes,Yes,1
+73,Female,B+,6,26,Hypertension,34.5,Yes,90,153,97,243,188,Yes,Yes,1
+56,Male,A-,3,17,None,31.3,No,80,139,88,223,162,No,Yes,1
+70,Female,O+,5,24,Diabetes,33.0,Yes,87,148,93,236,176,Yes,Yes,1
+72,Male,B-,4,19,Hypertension,30.6,Yes,84,161,102,255,121,Yes,Yes,2
+77,Female,A+,6,26,Hypertension,33.0,No,89,167,106,266,132,Yes,Yes,2
+61,Male,O-,3,13,None,29.2,Yes,80,154,97,242,113,No,Yes,2
+79,Female,AB+,5,21,Hypertension,32.0,Yes,92,169,107,272,136,Yes,Yes,2
+66,Male,A-,4,17,None,30.6,No,83,156,98,246,124,Yes,Yes,2
+79,Female,O+,8,27,Heart Disease,30.7,Yes,96,161,95,266,127,Yes,Yes,3
+72,Male,B-,9,29,Hypertension,29.2,Yes,102,159,93,283,138,Yes,Yes,3
+81,Female,A+,7,29,Heart Disease,28.4,No,94,155,90,261,125,Yes,Yes,3
+74,Male,O-,9,28,Diabetes,31.4,Yes,99,167,100,288,148,Yes,Yes,3
+83,Female,B+,8,29,Heart Disease,29.5,Yes,97,162,95,275,134,No,Yes,3
+48,Male,O-,1,3,None,26.0,No,75,125,83,203,98,No,No,0
+33,Female,A+,0,1,None,22.5,No,71,115,75,183,90,No,No,0
+28,Male,B-,0,0,None,21.8,No,73,113,73,179,88,No,No,0
+50,Female,AB+,2,3,None,27.1,Yes,80,129,85,211,102,No,Yes,0
+37,Male,O-,0,1,None,23.0,No,67,117,77,186,92,No,No,0
+63,Female,A+,6,21,Diabetes,32.5,Yes,87,147,93,231,170,Yes,Yes,1
+69,Male,O-,4,18,Diabetes,34.8,No,83,142,89,222,180,Yes,Yes,1
+75,Female,B+,7,27,Hypertension,35.1,Yes,91,154,98,245,190,Yes,Yes,1
+58,Male,A-,4,18,None,31.7,Yes,82,141,89,226,164,No,Yes,1
+68,Female,O+,6,25,Diabetes,33.4,No,89,149,94,238,178,Yes,Yes,1
+74,Male,B-,4,21,Hypertension,31.0,Yes,86,163,103,258,123,Yes,Yes,2
+79,Female,A+,6,27,Hypertension,33.3,No,92,168,107,269,134,Yes,Yes,2
+64,Male,O-,3,15,None,29.6,Yes,81,156,98,245,116,No,Yes,2
+82,Female,AB+,5,24,Hypertension,32.4,Yes,94,172,110,275,139,Yes,Yes,2
+69,Male,A-,4,20,None,31.0,No,85,159,101,249,127,Yes,Yes,2
+82,Female,O+,8,30,Heart Disease,31.1,Yes,99,164,98,269,130,Yes,Yes,3
+75,Male,B-,9,28,Hypertension,29.5,Yes,105,162,96,286,141,Yes,Yes,3
+84,Female,A+,7,30,Heart Disease,28.7,No,96,157,92,264,128,Yes,Yes,3
+77,Male,O-,9,29,Diabetes,31.7,Yes,102,169,102,291,151,Yes,Yes,3
+86,Female,B+,8,30,Heart Disease,29.8,Yes,100,164,97,278,137,No,Yes,3
+43,Male,O-,1,2,None,25.3,No,73,122,81,195,96,No,No,0
+30,Female,A+,0,0,None,21.9,No,69,111,71,177,88,No,No,0
+49,Male,B-,1,3,None,26.6,No,78,128,85,209,101,No,No,0
+36,Female,AB+,0,1,None,23.3,No,70,118,78,187,93,No,No,0
+56,Male,O-,2,5,None,28.2,Yes,81,133,88,218,107,Yes,Yes,0
+66,Female,A+,5,23,Diabetes,32.8,Yes,86,146,92,230,168,Yes,Yes,1
+62,Male,O-,4,19,Diabetes,34.4,No,81,141,88,220,177,Yes,Yes,1
+74,Female,B+,6,28,Hypertension,34.8,Yes,89,151,96,241,187,Yes,Yes,1
+57,Male,A-,3,19,None,31.5,No,79,138,87,222,161,No,Yes,1
+71,Female,O+,5,26,Diabetes,33.2,Yes,88,147,93,235,175,Yes,Yes,1
+73,Male,B-,4,22,Hypertension,30.8,Yes,85,160,101,254,120,Yes,Yes,2
+78,Female,A+,6,28,Hypertension,33.1,No,90,166,105,264,130,Yes,Yes,2
+63,Male,O-,3,16,None,29.5,Yes,82,155,97,243,115,No,Yes,2
+81,Female,AB+,5,25,Hypertension,32.3,Yes,93,171,109,274,138,Yes,Yes,2
+68,Male,A-,4,21,None,30.9,No,84,158,100,248,126,Yes,Yes,2
+80,Female,O+,8,29,Heart Disease,31.0,Yes,97,163,97,268,129,Yes,Yes,3
+73,Male,B-,9,27,Hypertension,29.4,Yes,103,161,95,285,140,Yes,Yes,3
+82,Female,A+,7,29,Heart Disease,28.6,No,95,156,91,263,127,Yes,Yes,3
+75,Male,O-,9,30,Diabetes,31.6,Yes,100,168,101,290,150,Yes,Yes,3
+84,Female,B+,8,30,Heart Disease,29.7,Yes,98,163,96,277,136,No,Yes,3
+39,Male,O+,1,1,None,24.9,No,71,120,79,191,95,No,No,0
+26,Female,A-,0,0,None,21.3,No,72,112,72,178,89,No,No,0
+45,Male,B+,1,2,None,26.3,No,76,127,84,207,100,No,No,0
+32,Female,AB-,0,0,None,22.9,No,69,116,76,185,92,No,No,0
+52,Male,O+,2,4,None,27.9,Yes,80,131,87,216,106,Yes,Yes,0
+65,Female,A-,5,24,Diabetes,33.1,Yes,88,148,94,233,171,Yes,Yes,1
+60,Male,O+,4,20,Diabetes,35.0,No,84,143,90,224,182,Yes,Yes,1
+71,Female,B-,6,29,Hypertension,35.3,Yes,92,155,99,247,192,Yes,Yes,1
+55,Male,A+,3,20,None,32.0,Yes,81,142,90,228,166,No,Yes,1
+69,Female,O-,5,27,Diabetes,33.7,No,90,150,95,240,180,Yes,Yes,1
+75,Male,B+,4,23,Hypertension,31.3,Yes,87,164,104,260,125,Yes,Yes,2
+80,Female,A-,6,29,Hypertension,33.6,No,93,170,108,271,136,Yes,Yes,2
+65,Male,O+,3,17,None,30.0,Yes,83,157,99,247,118,No,Yes,2
+83,Female,AB+,5,26,Hypertension,32.8,Yes,95,173,111,277,141,Yes,Yes,2
+70,Male,A-,4,22,None,31.3,No,86,160,102,251,129,Yes,Yes,2
+83,Female,O+,8,30,Heart Disease,31.4,Yes,100,165,99,271,132,Yes,Yes,3
+76,Male,B-,9,29,Hypertension,29.8,Yes,106,163,97,288,143,Yes,Yes,3
+85,Female,A+,7,30,Heart Disease,29.0,No,97,158,93,266,130,Yes,Yes,3
+78,Male,O-,9,30,Diabetes,32.0,Yes,103,170,103,293,153,Yes,Yes,3
+87,Female,B+,8,30,Heart Disease,30.1,Yes,101,165,98,280,139,No,Yes,3
+50,Male,other,1,2,None,26.5,No,75,126,83,205,100,No,No,0
+35,Female,O-,0,0,None,23.2,No,70,117,77,186,92,No,No,0
+54,Male,A+,2,4,None,28.5,Yes,82,135,89,222,110,Yes,Yes,0
+41,Female,B-,1,1,None,24.1,No,72,121,80,193,96,No,No,0
+28,Male,O+,0,0,None,22.1,No,68,114,74,180,89,No,No,0
+68,Female,A-,6,25,Diabetes,33.5,Yes,89,150,95,236,174,Yes,Yes,1
+64,Male,O+,5,21,Diabetes,35.3,No,85,145,91,227,185,Yes,Yes,1
+76,Female,B-,7,30,Hypertension,35.7,Yes,93,157,100,250,195,Yes,Yes,1
+59,Male,A+,4,21,None,32.4,Yes,83,144,91,231,169,No,Yes,1
+70,Female,O-,6,28,Diabetes,34.0,No,91,152,96,243,183,Yes,Yes,1
+76,Male,B+,4,24,Hypertension,31.6,Yes,88,165,105,262,127,Yes,Yes,2
+81,Female,A-,6,30,Hypertension,33.9,No,94,171,109,273,138,Yes,Yes,2
+66,Male,O+,3,18,None,30.3,Yes,84,158,100,249,120,No,Yes,2
+84,Female,AB+,5,27,Hypertension,33.1,Yes,96,174,112,279,143,Yes,Yes,2
+71,Male,A-,4,23,None,31.6,No,87,161,103,253,131,Yes,Yes,2
+84,Female,O+,8,30,Heart Disease,31.7,Yes,101,166,100,273,134,Yes,Yes,3
+77,Male,B-,9,30,Hypertension,30.1,Yes,107,164,98,290,145,Yes,Yes,3
+86,Female,A+,7,30,Heart Disease,29.3,No,98,159,94,268,132,Yes,Yes,3
+79,Male,O-,9,30,Diabetes,32.3,Yes,104,171,104,295,155,Yes,Yes,3
+88,Female,B+,8,30,Heart Disease,30.4,Yes,102,166,99,282,141,No,Yes,3
+53,Male,O-,1,3,None,27.2,No,76,128,85,210,103,No,No,0
+38,Female,A+,0,1,None,23.5,No,71,118,78,188,94,No,No,0
+58,Male,B-,2,5,None,28.8,Yes,83,136,90,224,111,Yes,Yes,0
+45,Female,AB+,1,2,None,24.5,No,73,123,81,196,98,No,No,0
+31,Male,O+,0,0,None,22.4,No,69,115,75,182,90,No,No,0
+70,Female,A-,6,26,Diabetes,33.8,Yes,90,151,96,238,176,Yes,Yes,1
+66,Male,O+,5,22,Diabetes,35.6,No,86,146,92,229,187,Yes,Yes,1
+78,Female,B-,7,30,Hypertension,36.0,Yes,94,158,101,252,197,Yes,Yes,1
+61,Male,A+,4,22,None,32.7,Yes,84,145,92,235,171,No,Yes,1
+72,Female,O-,6,29,Diabetes,34.3,No,92,153,97,245,185,Yes,Yes,1
+78,Male,B+,4,25,Hypertension,31.9,Yes,89,166,106,264,129,Yes,Yes,2
+83,Female,A-,6,30,Hypertension,34.2,No,95,172,110,275,140,Yes,Yes,2
+68,Male,O+,3,19,None,30.6,Yes,85,159,101,251,122,No,Yes,2
+85,Female,AB+,5,28,Hypertension,33.4,Yes,97,175,113,281,145,Yes,Yes,2
+73,Male,A-,4,24,None,31.9,No,88,162,104,255,133,Yes,Yes,2
+85,Female,O+,8,30,Heart Disease,32.0,Yes,102,167,101,275,136,Yes,Yes,3
+78,Male,B-,9,30,Hypertension,30.4,Yes,108,165,99,292,147,Yes,Yes,3
+87,Female,A+,7,30,Heart Disease,29.6,No,99,160,95,270,134,Yes,Yes,3
+80,Male,O-,9,30,Diabetes,32.6,Yes,105,172,105,297,157,Yes,Yes,3
+89,Female,B+,8,30,Heart Disease,30.7,Yes,103,167,100,284,143,No,Yes,3
+55,Male,O-,1,4,None,27.6,No,77,130,86,213,105,No,No,0
+40,Female,A+,0,1,None,23.8,No,72,119,79,190,95,No,No,0
+60,Male,B-,2,6,None,29.1,Yes,84,138,91,227,113,Yes,Yes,0
+47,Female,AB+,1,2,None,24.8,No,74,124,82,198,99,No,No,0
+33,Male,O+,0,0,None,22.7,No,70,116,76,184,91,No,No,0
+72,Female,A-,6,27,Diabetes,34.1,Yes,91,152,97,240,178,Yes,Yes,1
+68,Male,O+,5,23,Diabetes,35.9,No,87,147,93,231,189,Yes,Yes,1
+80,Female,B-,7,30,Hypertension,36.3,Yes,95,159,102,254,199,Yes,Yes,1
+63,Male,A+,4,23,None,33.0,Yes,85,146,93,235,173,No,Yes,1
+74,Female,O-,6,30,Diabetes,34.6,No,93,154,98,247,187,Yes,Yes,1
+80,Male,B+,4,26,Hypertension,32.2,Yes,90,167,107,266,131,Yes,Yes,2
+85,Female,A-,6,30,Hypertension,34.5,No,96,173,111,277,142,Yes,Yes,2
+70,Male,O+,3,20,None,30.9,Yes,86,160,102,253,124,No,Yes,2
+86,Female,AB+,5,29,Hypertension,33.7,Yes,98,176,114,283,147,Yes,Yes,2
+75,Male,A-,4,25,None,32.2,No,89,163,105,257,135,Yes,Yes,2
