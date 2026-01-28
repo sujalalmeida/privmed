@@ -110,6 +110,8 @@ export default function PatientDataCollection() {
         throw new Error(t || 'Request failed');
       }
       const data = await resp.json();
+      console.log('Backend Response:', data);
+      console.log('Risk Score:', data.risk_score, 'Disease Type:', data.disease_type);
       setResult({
         risk_score: data.risk_score,
         disease_type: data.disease_type,

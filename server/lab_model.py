@@ -1,5 +1,6 @@
 import os
 import pickle
+import glob
 from typing import Dict, Tuple
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -62,13 +63,41 @@ def model_path_for_lab(lab_label: str) -> str:
 
 
 def load_or_init_model(lab_label: str, n_features: int):
-    """Load existing model or create a new one based on MODEL_TYPE"""
+    """
+    Load existing model with priority:
+    1. Latest downloaded global model (best performance)
+    2. Lab's local model
+    3. Create new model
+    """
+    # Check for downloaded global models (use the most recent one)
+    base = os.path.dirname(__file__)
+    global_pattern = os.path.join(base, 'models', f'global_downloaded_{lab_label}_*.pkl')
+    global_models = glob.glob(global_pattern)
+    
+    if global_models:
+        # Use the most recent global model
+        latest_global = max(global_models, key=os.path.getmtime)
+        print(f"Loading global model for {lab_label}: {latest_global}")
+        try:
+            with open(latest_global, 'rb') as f:
+                model = pickle.load(f)
+                # Also copy it to the lab's local path for persistence
+                local_path = model_path_for_lab(lab_label)
+                with open(local_path, 'wb') as lf:
+                    pickle.dump(model, lf)
+                return model
+        except Exception as e:
+            print(f"Error loading global model: {e}, falling back to local model")
+    
+    # Check for lab's local model
     path = model_path_for_lab(lab_label)
     if os.path.exists(path):
+        print(f"Loading local model for {lab_label}: {path}")
         with open(path, 'rb') as f:
             return pickle.load(f)
     
-    # Create model based on configured type
+    # Create new model based on configured type
+    print(f"Creating new {MODEL_TYPE} model for {lab_label}")
     if MODEL_TYPE == 'random_forest':
         m = RandomForestClassifier(
             n_estimators=100, 

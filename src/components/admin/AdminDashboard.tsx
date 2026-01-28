@@ -2,9 +2,10 @@ import { useState } from 'react';
 import Layout from '../Layout';
 import IncomingReports from './IncomingReports';
 import ModelAggregation from './ModelAggregation';
-import { FileText, Brain } from 'lucide-react';
+import RoundHistory from './RoundHistory';
+import { FileText, Brain, Activity } from 'lucide-react';
 
-type Tab = 'reports' | 'models';
+type Tab = 'reports' | 'models' | 'rounds';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('reports');
@@ -12,6 +13,7 @@ export default function AdminDashboard() {
   const tabs = [
     { id: 'reports' as Tab, label: 'Incoming Reports', icon: FileText },
     { id: 'models' as Tab, label: 'Model Aggregation', icon: Brain },
+    { id: 'rounds' as Tab, label: 'FL Performance', icon: Activity },
   ];
 
   return (
@@ -45,6 +47,7 @@ export default function AdminDashboard() {
       <div>
         {activeTab === 'reports' && <IncomingReports />}
         {activeTab === 'models' && <ModelAggregation />}
+        {activeTab === 'rounds' && <RoundHistory />}
       </div>
     </Layout>
   );
