@@ -82,7 +82,13 @@ export default function FederatedLearning() {
     setDownloadError(null);
     
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
+      // Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
+      const rawLabLabel = user?.labName || user?.email || 'lab_sim';
+      const labLabel = rawLabLabel
+        .replace(/^Lab\s+/i, 'lab_')  // 'Lab A' -> 'lab_A'
+        .replace(/\s+/g, '_')         // Replace remaining spaces with underscores
+        .replace(/[^a-zA-Z0-9_]/g, ''); // Remove special chars
+      
       const response = await fetch(`${serverUrl}/lab/download_global_model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -221,8 +227,12 @@ export default function FederatedLearning() {
     setSendError(null);
 
     try {
-      // Use the same lab_label logic as PatientDataCollection
-      const labLabel = user?.labName || user?.email || 'lab_sim';
+      // Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
+      const rawLabLabel = user?.labName || user?.email || 'lab_sim';
+      const labLabel = rawLabLabel
+        .replace(/^Lab\s+/i, 'lab_')  // 'Lab A' -> 'lab_A'
+        .replace(/\s+/g, '_')         // Replace remaining spaces with underscores
+        .replace(/[^a-zA-Z0-9_]/g, ''); // Remove special chars
 
       const response = await fetch('http://127.0.0.1:5001/lab/send_model_update', {
         method: 'POST',

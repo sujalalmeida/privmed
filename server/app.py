@@ -23,13 +23,19 @@ from sklearn.linear_model import LogisticRegression
 
 from lab_model import (
     CATEGORICAL_MAPS,
+    DISEASE_TYPES,
+    FEATURE_COLUMNS,
     encode_features,
+    encode_clinical_features,
+    ensure_features_for_model,
     model_path_for_lab,
     load_or_init_model,
     save_model,
     get_parameters,
     set_parameters,
     predict_prob,
+    predict_with_baseline,
+    predict_rule_based,
 )
 
 # Load env from both repo root and server folder.
@@ -128,17 +134,38 @@ def generate_clinical_insights(body: dict, disease_type: str, risk_score: float)
         'recommendations': []
     }
     
+    # Helper function to safely convert to numeric with fallback
+    def safe_float(value, default):
+        if value is None or value == '':
+            return float(default)
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return float(default)
+    
+    def safe_int(value, default):
+        if value is None or value == '':
+            return int(default)
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return int(default)
+    
+    # Handle None body
+    if body is None:
+        body = {}
+    
     # Analyze risk factors
-    age = int(body.get('age', 30))
-    bmi = float(body.get('bmi', 25.0))
-    bp_sys = int(body.get('bp_sys', 120))
-    bp_dia = int(body.get('bp_dia', 80))
-    glucose = int(body.get('glucose', 100))
-    cholesterol = int(body.get('cholesterol', 200))
-    smoker = str(body.get('smoker_status', 'no')).lower()
-    family_history = str(body.get('family_history', 'none')).lower()
-    medication_use = str(body.get('medication_use', 'none')).lower()
-    prior = str(body.get('prior_conditions', '')).lower()
+    age = safe_int(body.get('age'), 30)
+    bmi = safe_float(body.get('bmi'), 25.0)
+    bp_sys = safe_int(body.get('bp_sys'), 120)
+    bp_dia = safe_int(body.get('bp_dia'), 80)
+    glucose = safe_int(body.get('glucose'), 100)
+    cholesterol = safe_int(body.get('cholesterol'), 200)
+    smoker = str(body.get('smoker_status', 'no') or 'no').lower()
+    family_history = str(body.get('family_history', 'none') or 'none').lower()
+    medication_use = str(body.get('medication_use', 'none') or 'none').lower()
+    prior = str(body.get('prior_conditions', '') or '').lower()
     
     # Identify risk factors
     if smoker == 'yes':
@@ -236,8 +263,10 @@ def _encode_row(row: pd.Series) -> np.ndarray:
     return X
 
 def _encode_row_from_db(record: dict) -> np.ndarray:
-    # Use default values for missing fields since the database might not have all new columns yet
-    # Handle None values safely
+    """
+    Encode a database record to feature vector.
+    Supports both old and new clinical schemas.
+    """
     def safe_int(val, default=0):
         return int(val) if val is not None else default
     
@@ -247,40 +276,125 @@ def _encode_row_from_db(record: dict) -> np.ndarray:
     def safe_str(val, default=''):
         return str(val) if val is not None else default
     
-    payload = {
-        'age': safe_int(record.get('age'), 30),
-        'discomfort_level': safe_int(record.get('discomfort_level'), 3),
-        'symptom_duration': safe_int(record.get('symptom_duration'), 7),
-        'gender': safe_str(record.get('gender'), 'male').lower(),
-        'blood_type': safe_str(record.get('blood_type'), 'O').upper(),
-        'prior_conditions': safe_str(record.get('prior_conditions'), ''),
-        'bmi': safe_float(record.get('bmi'), 25.0),
-        'smoker_status': safe_str(record.get('smoker_status'), 'no').lower(),
-        'heart_rate': safe_int(record.get('heart_rate'), 70),
-        'bp_sys': safe_int(record.get('bp_sys'), 120),
-        'bp_dia': safe_int(record.get('bp_dia'), 80),
-        'cholesterol': safe_int(record.get('cholesterol'), 200),
-        'glucose': safe_int(record.get('glucose'), 100),
-        'family_history': safe_str(record.get('family_history'), 'none').lower(),
-        'medication_use': safe_str(record.get('medication_use'), 'none').lower(),
-    }
+    # Check if this is new clinical schema (has systolic_bp) or old schema (has bp_sys)
+    is_new_schema = 'systolic_bp' in record or 'fasting_glucose' in record
+    
+    if is_new_schema:
+        # New clinical schema
+        payload = {
+            'age': safe_int(record.get('age'), 50),
+            'sex': safe_str(record.get('sex'), 'M'),
+            'bmi': safe_float(record.get('bmi'), 25.0),
+            'systolic_bp': safe_int(record.get('systolic_bp'), 120),
+            'diastolic_bp': safe_int(record.get('diastolic_bp'), 80),
+            'heart_rate': safe_int(record.get('heart_rate'), 72),
+            'fasting_glucose': safe_int(record.get('fasting_glucose'), 100),
+            'hba1c': safe_float(record.get('hba1c'), 5.5),
+            'total_cholesterol': safe_int(record.get('total_cholesterol'), 200),
+            'ldl_cholesterol': safe_int(record.get('ldl_cholesterol'), 100),
+            'hdl_cholesterol': safe_int(record.get('hdl_cholesterol'), 50),
+            'triglycerides': safe_int(record.get('triglycerides'), 150),
+            'chest_pain_type': safe_int(record.get('chest_pain_type'), 4),
+            'resting_ecg': safe_int(record.get('resting_ecg'), 0),
+            'max_heart_rate': safe_int(record.get('max_heart_rate'), 150),
+            'exercise_angina': safe_int(record.get('exercise_angina'), 0),
+            'st_depression': safe_float(record.get('st_depression'), 0.0),
+            'st_slope': safe_int(record.get('st_slope'), 2),
+            'smoking_status': safe_int(record.get('smoking_status'), 0),
+            'family_history_cvd': safe_int(record.get('family_history_cvd'), 0),
+            'family_history_diabetes': safe_int(record.get('family_history_diabetes'), 0),
+            'prior_hypertension': safe_int(record.get('prior_hypertension'), 0),
+            'prior_diabetes': safe_int(record.get('prior_diabetes'), 0),
+            'prior_heart_disease': safe_int(record.get('prior_heart_disease'), 0),
+            'on_bp_medication': safe_int(record.get('on_bp_medication'), 0),
+            'on_diabetes_medication': safe_int(record.get('on_diabetes_medication'), 0),
+            'on_cholesterol_medication': safe_int(record.get('on_cholesterol_medication'), 0),
+        }
+    else:
+        # Legacy schema - map to new format
+        payload = {
+            'age': safe_int(record.get('age'), 30),
+            'sex': 'M' if safe_str(record.get('gender'), 'male').lower() == 'male' else 'F',
+            'bmi': safe_float(record.get('bmi'), 25.0),
+            'systolic_bp': safe_int(record.get('bp_sys'), 120),
+            'diastolic_bp': safe_int(record.get('bp_dia'), 80),
+            'heart_rate': safe_int(record.get('heart_rate'), 72),
+            'fasting_glucose': safe_int(record.get('glucose'), 100),
+            'hba1c': 5.5,  # Not in old schema
+            'total_cholesterol': safe_int(record.get('cholesterol'), 200),
+            'ldl_cholesterol': safe_int(record.get('cholesterol', 200)) * 0.6,
+            'hdl_cholesterol': 50,
+            'triglycerides': 150,
+            'chest_pain_type': 4,
+            'resting_ecg': 0,
+            'max_heart_rate': 220 - safe_int(record.get('age'), 30),
+            'exercise_angina': 0,
+            'st_depression': 0.0,
+            'st_slope': 2,
+            'smoking_status': 2 if safe_str(record.get('smoker_status'), 'no').lower() == 'yes' else 0,
+            'family_history_cvd': 1 if safe_str(record.get('family_history'), 'none').lower() == 'heart_disease' else 0,
+            'family_history_diabetes': 1 if safe_str(record.get('family_history'), 'none').lower() == 'diabetes' else 0,
+            'prior_hypertension': 0,
+            'prior_diabetes': 0,
+            'prior_heart_disease': 0,
+            'on_bp_medication': 0,
+            'on_diabetes_medication': 0,
+            'on_cholesterol_medication': 0,
+        }
+    
     X, _ = encode_features(payload)
     return X
 
 
 def _predict_label_from_features(body: dict) -> int:
     """
-    Rule-based label prediction for initial training data
+    Rule-based label prediction based on clinical features.
+    Supports both old and new clinical schemas.
     Returns: 0=healthy, 1=diabetes, 2=hypertension, 3=heart_disease
     """
-    glucose = int(body.get('glucose', 100))
-    bp_sys = int(body.get('bp_sys', 120))
-    bp_dia = int(body.get('bp_dia', 80))
-    cholesterol = int(body.get('cholesterol', 200))
-    bmi = float(body.get('bmi', 25.0))
-    heart_rate = int(body.get('heart_rate', 70))
-    age = int(body.get('age', 30))
-    smoker = str(body.get('smoker_status', 'no')).lower()
+    # Helper functions for safe conversion
+    def safe_int(value, default):
+        if value is None or value == '':
+            return int(default)
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return int(default)
+    
+    def safe_float(value, default):
+        if value is None or value == '':
+            return float(default)
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return float(default)
+    
+    # Handle None body
+    if body is None:
+        body = {}
+    
+    # Support both old and new field names
+    glucose = safe_int(body.get('fasting_glucose', body.get('glucose')), 100)
+    bp_sys = safe_int(body.get('systolic_bp', body.get('bp_sys')), 120)
+    bp_dia = safe_int(body.get('diastolic_bp', body.get('bp_dia')), 80)
+    cholesterol = safe_int(body.get('total_cholesterol', body.get('cholesterol')), 200)
+    bmi = safe_float(body.get('bmi'), 25.0)
+    hba1c = safe_float(body.get('hba1c'), 5.5)
+    age = safe_int(body.get('age'), 30)
+    
+    # Handle smoking status - support both old and new formats
+    smoking_raw = body.get('smoking_status', body.get('smoker_status', 'no'))
+    if smoking_raw is None:
+        is_smoker = False
+    elif isinstance(smoking_raw, int):
+        is_smoker = smoking_raw == 2
+    else:
+        is_smoker = str(smoking_raw).lower() in ['yes', 'current', '2']
+    
+    # Cardiac markers from new schema
+    chest_pain = safe_int(body.get('chest_pain_type'), 4)
+    st_depression = safe_float(body.get('st_depression'), 0)
+    exercise_angina = safe_int(body.get('exercise_angina'), 0)
     
     # Score different conditions
     diabetes_score = 0
@@ -288,27 +402,33 @@ def _predict_label_from_features(body: dict) -> int:
     heart_disease_score = 0
     
     # Diabetes indicators
-    if glucose >= 126:
-        diabetes_score += 3
-    elif glucose >= 100:
+    if glucose >= 126 or hba1c >= 6.5:
+        diabetes_score += 4
+    elif glucose >= 100 or hba1c >= 5.7:
         diabetes_score += 2
     if bmi >= 30:
         diabetes_score += 1
     
     # Hypertension indicators
     if bp_sys >= 140 or bp_dia >= 90:
-        hypertension_score += 3
+        hypertension_score += 4
     elif bp_sys >= 130 or bp_dia >= 85:
         hypertension_score += 2
     if age > 60:
         hypertension_score += 1
     
     # Heart disease indicators
+    if chest_pain in [1, 2]:  # Typical or atypical angina
+        heart_disease_score += 3
+    if st_depression > 1.0:
+        heart_disease_score += 2
+    if exercise_angina == 1:
+        heart_disease_score += 2
     if cholesterol >= 240:
         heart_disease_score += 2
     elif cholesterol >= 200:
         heart_disease_score += 1
-    if smoker == 'yes':
+    if is_smoker:
         heart_disease_score += 2
     if bp_sys >= 140:
         heart_disease_score += 1
@@ -318,7 +438,7 @@ def _predict_label_from_features(body: dict) -> int:
     # Determine primary condition based on highest score
     max_score = max(diabetes_score, hypertension_score, heart_disease_score)
     
-    if max_score == 0:
+    if max_score < 2:
         return 0  # healthy
     elif diabetes_score == max_score:
         return 1  # diabetes
@@ -330,14 +450,51 @@ def _predict_label_from_features(body: dict) -> int:
 
 def _calculate_confidence_score(body: dict, predicted_label: int) -> float:
     """
-    Calculate confidence score based on how strong the risk factors are
+    Calculate confidence score based on how strong the risk factors are.
+    Supports both old and new clinical schemas.
     Returns: float between 0.5 and 0.95
     """
-    glucose = int(body.get('glucose', 100))
-    bp_sys = int(body.get('bp_sys', 120))
-    bp_dia = int(body.get('bp_dia', 80))
-    cholesterol = int(body.get('cholesterol', 200))
-    bmi = float(body.get('bmi', 25.0))
+    # Helper functions for safe conversion
+    def safe_int(value, default):
+        if value is None or value == '':
+            return int(default)
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return int(default)
+    
+    def safe_float(value, default):
+        if value is None or value == '':
+            return float(default)
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return float(default)
+    
+    # Handle None body
+    if body is None:
+        body = {}
+    
+    # Support both field names
+    glucose = safe_int(body.get('fasting_glucose', body.get('glucose')), 100)
+    bp_sys = safe_int(body.get('systolic_bp', body.get('bp_sys')), 120)
+    bp_dia = safe_int(body.get('diastolic_bp', body.get('bp_dia')), 80)
+    cholesterol = safe_int(body.get('total_cholesterol', body.get('cholesterol')), 200)
+    bmi = safe_float(body.get('bmi'), 25.0)
+    hba1c = safe_float(body.get('hba1c'), 5.5)
+    age = safe_int(body.get('age'), 30)
+    
+    # Cardiac markers
+    chest_pain = safe_int(body.get('chest_pain_type'), 4)
+    st_depression = safe_float(body.get('st_depression'), 0)
+    exercise_angina = safe_int(body.get('exercise_angina'), 0)
+    
+    # Handle smoking
+    smoking_raw = body.get('smoking_status', body.get('smoker_status', 'no'))
+    if isinstance(smoking_raw, int):
+        is_smoker = smoking_raw == 2
+    else:
+        is_smoker = str(smoking_raw).lower() in ['yes', 'current', '2']
     age = int(body.get('age', 30))
     smoker = str(body.get('smoker_status', 'no')).lower()
     
@@ -407,6 +564,137 @@ def _calculate_confidence_score(body: dict, predicted_label: int) -> float:
     return min(0.95, max(0.50, confidence))
 
 
+def _safe_int(value, default=0):
+    if value is None or value == '':
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_float(value, default=None):
+    if value is None or value == '':
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _build_patient_record_from_submit(body, prediction):
+    """
+    Build a patient_records row from /submit request body (new clinical schema)
+    and prediction result. Used so /submit can persist data via backend (bypasses RLS).
+    """
+    lab_label = body.get('lab_label') or 'lab_A'
+    age = _safe_int(body.get('age'), 50)
+    sex = str(body.get('sex', body.get('gender', 'M')) or 'M')
+
+    row = {
+        'lab_label': lab_label,
+        'patient_id': body.get('patient_id'),
+        'age': age,
+        'sex': sex,
+        'height_cm': _safe_float(body.get('height_cm')),
+        'weight_kg': _safe_float(body.get('weight_kg')),
+        'bmi': _safe_float(body.get('bmi')),
+        'systolic_bp': _safe_int(body.get('systolic_bp'), 120),
+        'diastolic_bp': _safe_int(body.get('diastolic_bp'), 80),
+        'heart_rate': _safe_int(body.get('heart_rate'), 72),
+        'fasting_glucose': _safe_int(body.get('fasting_glucose'), 100),
+        'hba1c': _safe_float(body.get('hba1c')),
+        'insulin': _safe_float(body.get('insulin')),
+        'total_cholesterol': _safe_int(body.get('total_cholesterol'), 200),
+        'ldl_cholesterol': _safe_int(body.get('ldl_cholesterol')),
+        'hdl_cholesterol': _safe_int(body.get('hdl_cholesterol')),
+        'triglycerides': _safe_int(body.get('triglycerides')),
+        'chest_pain_type': _safe_int(body.get('chest_pain_type'), 4),
+        'resting_ecg': _safe_int(body.get('resting_ecg'), 0),
+        'max_heart_rate': _safe_int(body.get('max_heart_rate'), 220 - age),
+        'exercise_angina': _safe_int(body.get('exercise_angina'), 0),
+        'st_depression': _safe_float(body.get('st_depression'), 0.0),
+        'st_slope': _safe_int(body.get('st_slope'), 2),
+        'smoking_status': _safe_int(body.get('smoking_status'), 0),
+        'family_history_cvd': _safe_int(body.get('family_history_cvd'), 0),
+        'family_history_diabetes': _safe_int(body.get('family_history_diabetes'), 0),
+        'prior_hypertension': _safe_int(body.get('prior_hypertension'), 0),
+        'prior_diabetes': _safe_int(body.get('prior_diabetes'), 0),
+        'prior_heart_disease': _safe_int(body.get('prior_heart_disease'), 0),
+        'on_bp_medication': _safe_int(body.get('on_bp_medication'), 0),
+        'on_diabetes_medication': _safe_int(body.get('on_diabetes_medication'), 0),
+        'on_cholesterol_medication': _safe_int(body.get('on_cholesterol_medication'), 0),
+        'diagnosis': int(prediction.get('diagnosis', 0)),
+        'diagnosis_label': str(prediction.get('diagnosis_label', 'healthy')),
+        'confidence': float(prediction.get('confidence', 0.5)),
+        'probabilities': prediction.get('probabilities'),
+    }
+    # Omit None values so DB defaults apply where applicable
+    return {k: v for k, v in row.items() if v is not None}
+
+
+@app.post("/submit")
+def submit_patient_data():
+    """
+    Submit patient data for AI prediction using the trained baseline model.
+    
+    This endpoint uses the trained model if available, otherwise falls back
+    to rule-based prediction. Returns diagnosis with probabilities.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        lab_label = body.get('lab_label', 'lab_A')
+        
+        print(f"Received patient data for prediction from {lab_label}")
+        
+        # Try to use the trained baseline model first
+        prediction = predict_with_baseline(body)
+        
+        # Generate clinical insights
+        insights = generate_clinical_insights(body, prediction['diagnosis_label'], prediction['confidence'])
+        
+        # Also return the old format fields for backward compatibility
+        response = {
+            # New format
+            'diagnosis': prediction['diagnosis'],
+            'diagnosis_label': prediction['diagnosis_label'],
+            'confidence': prediction['confidence'],
+            'probabilities': prediction['probabilities'],
+            
+            # Old format for backward compatibility
+            'risk_score': prediction['confidence'],
+            'disease_type': prediction['diagnosis_label'],
+            
+            # Clinical insights
+            'insights': insights,
+            
+            # Meta
+            'model_type': 'baseline_global_model',
+            'lab_label': lab_label,
+        }
+        
+        print(f"Prediction: {prediction['diagnosis_label']} ({prediction['confidence']:.1%} confidence)")
+
+        # Option B: persist patient record from /submit using backend (bypasses RLS)
+        try:
+            row = _build_patient_record_from_submit(body, prediction)
+            sb().table('patient_records').insert(row).execute()
+            print(f"Saved patient record to patient_records for lab_label={row.get('lab_label')}")
+        except Exception as db_err:
+            import traceback
+            print(f"Error saving patient record from /submit: {db_err}")
+            traceback.print_exc()
+            # Do not fail the request; prediction was successful
+
+        return jsonify(response)
+        
+    except Exception as e:
+        import traceback
+        print(f"Error in submit: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.post("/lab/add_patient_data")
 def add_patient_data():
     try:
@@ -434,8 +722,15 @@ def add_patient_data():
                     if X_row.shape[1] != X_req.shape[1]:
                         print(f"Warning: Feature dimension mismatch. DB: {X_row.shape[1]}, Request: {X_req.shape[1]}")
                         continue
+                    # Get label - support both 'disease_label' (old) and 'diagnosis' (new)
+                    label = record.get('disease_label')
+                    if label is None:
+                        label = record.get('diagnosis')
+                    if label is None:
+                        print(f"Warning: Skipping record with missing disease_label/diagnosis")
+                        continue
                     X_list.append(X_row)
-                    y_list.append(record['disease_label'])
+                    y_list.append(int(label))
                 
                 if X_list and len(X_list) > 0:
                     X_train = np.vstack(X_list)
@@ -455,6 +750,10 @@ def add_patient_data():
 
         # Load or initialize model
         model = load_or_init_model(lab_label, X_req.shape[1])
+        # Pad to model's expected features if needed (e.g. 27 -> 33 for downloaded global)
+        X_req = ensure_features_for_model(X_req, model)
+        if X_train is not None:
+            X_train = ensure_features_for_model(X_train, model)
         prev_coef, prev_intercept = get_parameters(model)
     
         # Train model on lab's data
@@ -503,12 +802,25 @@ def add_patient_data():
             # Calculate model accuracy for tracking
             local_accuracy = float(model.score(X_train_scaled, y_train))
             
-            # Compute grad norm
-            new_coef, new_intercept = get_parameters(model)
-            grad_norm = float(np.mean([
-                np.linalg.norm((new_coef - prev_coef).ravel(), ord=2),
-                np.linalg.norm((new_intercept - prev_intercept).ravel(), ord=2)
-            ]))
+            # Compute grad norm (handle dimension mismatches gracefully)
+            try:
+                new_coef, new_intercept = get_parameters(model)
+                # Check if dimensions match before computing norm
+                if new_coef.shape == prev_coef.shape and new_intercept.shape == prev_intercept.shape:
+                    grad_norm = float(np.mean([
+                        np.linalg.norm((new_coef - prev_coef).ravel(), ord=2),
+                        np.linalg.norm((new_intercept - prev_intercept).ravel(), ord=2)
+                    ]))
+                else:
+                    # Dimensions don't match (e.g., feature count changed), use norm of new params
+                    print(f"Parameter dimension mismatch: prev {prev_coef.shape}, new {new_coef.shape}. Using new param norm.")
+                    grad_norm = float(np.mean([
+                        np.linalg.norm(new_coef.ravel(), ord=2),
+                        np.linalg.norm(new_intercept.ravel(), ord=2)
+                    ]))
+            except Exception as e:
+                print(f"Error computing grad norm: {e}. Using default value.")
+                grad_norm = 1.0
             
             print(f"Model trained with {local_accuracy:.1%} accuracy (for tracking only)")
 
@@ -521,7 +833,7 @@ def add_patient_data():
             'discomfort_level': int(body['discomfort_level']),
             'symptom_duration': int(body['symptom_duration']),
             'prior_conditions': str(body.get('prior_conditions') or ''),
-            'bmi': float(body.get('bmi', 25.0)),
+            'bmi': float(body.get('bmi') or 25.0) if body.get('bmi') is not None else 25.0,
             'smoker_status': str(body.get('smoker_status', 'no')),
             'heart_rate': int(body.get('heart_rate', 70)),
             'bp_sys': int(body.get('bp_sys', 120)),
@@ -601,7 +913,16 @@ def add_patient_data():
 def send_model_update():
     """Retrain and send model update without new patient data"""
     body = request.get_json(force=True) or {}
-    lab_label = body.get('lab_label') or 'lab_sim'
+    raw_lab_label = body.get('lab_label') or 'lab_sim'
+    # Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
+    import re
+    lab_label = str(raw_lab_label)
+    # Convert 'Lab X' pattern to 'lab_X'
+    lab_label = re.sub(r'^Lab\s+', 'lab_', lab_label, flags=re.IGNORECASE)
+    # Replace remaining spaces with underscores
+    lab_label = re.sub(r'\s+', '_', lab_label)
+    # Remove any other special characters
+    lab_label = re.sub(r'[^a-zA-Z0-9_]', '', lab_label)
     
     try:
         # Debug: Print the lab_label being searched for
@@ -623,23 +944,38 @@ def send_model_update():
         # Convert to training data
         X_list = []
         y_list = []
+        expected_dims = 27  # New clinical schema always uses 27 features
         for record in lab_records.data:
+            # Get disease label - support both 'disease_label' (old) and 'diagnosis' (new)
+            disease_label = record.get('disease_label')
+            if disease_label is None:
+                disease_label = record.get('diagnosis')
+            if disease_label is None:
+                print(f"Warning: Skipping record with missing disease_label/diagnosis")
+                continue
+            
             X_row = _encode_row_from_db(record)
+            # Log first record's dimensions
+            if len(X_list) == 0:
+                print(f"Training with {X_row.shape[1]} features (detected from first record)")
             # Ensure feature vector has consistent dimensions
-            if X_row.shape[1] != 33:  # Expected feature dimension
-                print(f"Warning: Feature dimension mismatch in send_model_update. Got: {X_row.shape[1]}")
+            if X_row.shape[1] != expected_dims:
+                print(f"Warning: Feature dimension mismatch. Got: {X_row.shape[1]}, expected: {expected_dims}. Skipping.")
                 continue
             X_list.append(X_row)
-            y_list.append(record['disease_label'])
+            y_list.append(int(disease_label))
         
         if not X_list:
-            return jsonify({'error': 'No valid training data found'}), 400
+            return jsonify({'error': 'No valid training data found (all records missing disease_label/diagnosis or have wrong dimensions)'}), 400
             
         X_train = np.vstack(X_list)
         y_train = np.array(y_list, dtype=int)
+        print(f"Successfully loaded {len(X_list)} records for training")
         
         # Load current model
         model = load_or_init_model(lab_label, X_train.shape[1])
+        # Pad to model's expected features if needed (e.g. 27 -> 33 for downloaded global)
+        X_train = ensure_features_for_model(X_train, model)
         prev_coef, prev_intercept = get_parameters(model)
         
         # Retrain model
@@ -667,13 +1003,25 @@ def send_model_update():
         model.fit(X_train_scaled, y_train)
         save_model(lab_label, model)
         
-        # Compute grad norm
-        new_coef, new_intercept = get_parameters(model)
-        grad_norm = float(np.mean([
-            np.linalg.norm((new_coef - prev_coef).ravel(), ord=2),
-            np.linalg.norm((new_intercept - prev_intercept).ravel(), ord=2)
-        ]))
-        
+        # Compute grad norm (handle dimension mismatches gracefully)
+        try:
+            new_coef, new_intercept = get_parameters(model)
+            # Check if dimensions match before computing norm
+            if new_coef.shape == prev_coef.shape and new_intercept.shape == prev_intercept.shape:
+                grad_norm = float(np.mean([
+                    np.linalg.norm((new_coef - prev_coef).ravel(), ord=2),
+                    np.linalg.norm((new_intercept - prev_intercept).ravel(), ord=2)
+                ]))
+            else:
+                # Dimensions don't match (e.g., feature count changed), use norm of new params
+                print(f"Parameter dimension mismatch: prev {prev_coef.shape}, new {new_coef.shape}. Using new param norm.")
+                grad_norm = float(np.mean([
+                    np.linalg.norm(new_coef.ravel(), ord=2),
+                    np.linalg.norm(new_intercept.ravel(), ord=2)
+                ]))
+        except Exception as e:
+            print(f"Error computing grad norm: {e}. Using default value.")
+            grad_norm = 1.0        
         # Upload model to Supabase Storage
         timestamp = int(time.time())
         storage_path = f"models/local/{lab_label}/{timestamp}.pkl"
@@ -813,11 +1161,22 @@ def aggregate_models():
                         os.unlink(tmp_path)
                         continue
                     
+                    # Accept 27 (new schema) or 33 (legacy) feature models; skip other dimensions
+                    model_features = None
+                    if hasattr(model, 'n_features_in_'):
+                        model_features = model.n_features_in_
+                    VALID_FEATURE_COUNTS = (27, 33)
+                    if model_features is not None and model_features not in VALID_FEATURE_COUNTS:
+                        print(f"Skipping model from {lab_label}: has {model_features} features, expected 27 or 33")
+                        os.unlink(tmp_path)
+                        continue
+                    
                     models_data.append({
                         'params': params,
                         'num_examples': num_examples,
                         'lab': lab_label,
-                        'accuracy': update.get('local_accuracy', 0)
+                        'accuracy': update.get('local_accuracy', 0),
+                        'model_features': model_features or 27,
                     })
                     total_samples += num_examples
                 
@@ -831,7 +1190,17 @@ def aggregate_models():
         if not models_data:
             return jsonify({'error': 'no valid models found'}), 400
 
-        print(f"Total samples across all labs: {total_samples}")
+        # Only aggregate models with the same feature count (all 27 or all 33)
+        from collections import defaultdict
+        by_features = defaultdict(list)
+        for data in models_data:
+            by_features[data['model_features']].append(data)
+        # Use the group with most total samples
+        best_feature_count = max(by_features.keys(), key=lambda n: sum(d['num_examples'] for d in by_features[n]))
+        models_data = by_features[best_feature_count]
+        n_features_aggregated = best_feature_count
+        total_samples = sum(d['num_examples'] for d in models_data)
+        print(f"Aggregating {len(models_data)} models with {n_features_aggregated} features, total samples: {total_samples}")
 
         # Apply Federated Averaging (FedAvg)
         model_type = models_data[0]['params']['type']
@@ -859,6 +1228,7 @@ def aggregate_models():
             global_model.coef_ = weighted_coef
             global_model.intercept_ = weighted_intercept
             global_model.classes_ = np.array([0, 1, 2, 3])
+            global_model.n_features_in_ = n_features_aggregated
             
         else:  # tree-based models
             # For tree models, create a weighted voting ensemble
@@ -886,12 +1256,13 @@ def aggregate_models():
                 weights=weights
             )
             
-            # The VotingClassifier needs to be "fitted" with dummy data to initialize
-            # We'll use a small subset from the first model's training set
+            # The VotingClassifier needs to be "fitted" with dummy data matching aggregated models
+            n_features = n_features_aggregated
+            print(f"Creating ensemble with {n_features} features")
+            
             try:
-                # Create minimal dummy data just to initialize the ensemble
-                # Feature count: 9 numeric + 3 gender + 8 blood_type + 2 smoker + 4 family + 6 medication + 1 prior_len = 33
-                dummy_X = np.random.randn(5, 33)  # 5 samples, 33 features (our actual feature count)
+                # Create minimal dummy data to initialize the ensemble
+                dummy_X = np.random.randn(5, n_features)  # 5 samples
                 dummy_y = np.array([0, 1, 2, 3, 0])  # Dummy labels covering all classes
                 global_model.fit(dummy_X, dummy_y)
                 print(f"Created weighted voting ensemble from {len(valid_models)} lab models")
@@ -923,38 +1294,56 @@ def aggregate_models():
         finally:
             os.unlink(tmp_path)
 
-        # Evaluate global model on test dataset
-        # Use patient_data.csv and split it into train/test
+        # Evaluate global model on test dataset (encode 27 features, pad to model dim if 33)
         global_accuracy = None
         
         try:
-            data_path = os.path.join(os.path.dirname(__file__), 'data', 'patient_data.csv')
+            data_path = os.path.join(os.path.dirname(__file__), 'data', 'combined_test.csv')
+            print(f"Evaluating global model with {n_features_aggregated} features using combined_test.csv")
+            
             if os.path.exists(data_path):
                 df = pd.read_csv(data_path)
                 
-                # Encode features and labels
+                # Encode features using clinical schema (27 features)
+                from lab_model import encode_clinical_features
                 X_list, y_list = [], []
+                
                 for _, r in df.iterrows():
-                    X_list.append(_encode_row(r))
-                    y_list.append(int(r['disease_label']))
+                    try:
+                        row_dict = r.to_dict()
+                        X_row, _ = encode_clinical_features(row_dict)
+                        if X_row.shape[1] != 27:
+                            print(f"Warning: Row encoded with {X_row.shape[1]} features, expected 27")
+                            continue
+                        X_list.append(X_row)
+                        # Handle both 'label' and 'disease_label' column names
+                        label = row_dict.get('label', row_dict.get('disease_label', 0))
+                        y_list.append(int(label))
+                    except Exception as row_err:
+                        continue
+                
+                if len(X_list) == 0:
+                    raise ValueError("No valid samples could be encoded from test data")
+                    
                 X_all = np.vstack(X_list)
                 y_all = np.array(y_list)
+                # Pad to global model's feature count if needed (27 -> 33)
+                X_all = ensure_features_for_model(X_all, global_model)
                 
-                # Split into train (80%) and test (20%)
-                from sklearn.model_selection import train_test_split
-                X_train, X_test, y_train, y_test = train_test_split(
-                    X_all, y_all, test_size=0.2, random_state=42, stratify=y_all
-                )
+                print(f"Encoded {len(X_list)} samples with {X_all.shape[1]} features for evaluation")
                 
-                # Scale test data using scaler fitted on training data
+                # combined_test.csv is already a test set - use directly
+                X_test = X_all
+                y_test = y_all
+                
+                # Scale features
                 scaler_eval = StandardScaler()
-                scaler_eval.fit(X_train)  # Fit on training data
-                X_test_scaled = scaler_eval.transform(X_test)  # Transform test data
+                X_test_scaled = scaler_eval.fit_transform(X_test)
                 
                 # Evaluate on test set
                 preds = global_model.predict(X_test_scaled)
                 global_accuracy = float((preds == y_test).mean())
-                print(f"Global model accuracy on test set: {global_accuracy:.3f} (evaluated on {len(y_test)}/{len(y_all)} samples)")
+                print(f"Global model accuracy on test set: {global_accuracy:.3f} (evaluated on {len(y_test)} samples)")
             else:
                 print(f"Test data file not found: {data_path}")
                 # Fallback: use weighted average of local accuracies
@@ -1188,7 +1577,16 @@ def download_global_model():
     """
     try:
         body = request.get_json(force=True) or {}
-        lab_label = body.get('lab_label', 'unknown')
+        raw_lab_label = body.get('lab_label', 'unknown')
+        # Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
+        import re
+        lab_label = str(raw_lab_label)
+        # Convert 'Lab X' pattern to 'lab_X'
+        lab_label = re.sub(r'^Lab\s+', 'lab_', lab_label, flags=re.IGNORECASE)
+        # Replace remaining spaces with underscores
+        lab_label = re.sub(r'\s+', '_', lab_label)
+        # Remove any other special characters
+        lab_label = re.sub(r'[^a-zA-Z0-9_]', '', lab_label)
         
         print(f"Lab {lab_label} requesting global model download")
         
@@ -1245,7 +1643,11 @@ def download_global_model():
                     improvement = ((global_accuracy - accuracy_before) / accuracy_before) * 100
                     download_record['improvement_percentage'] = round(improvement, 2)
                 
-                sb().table('fl_model_downloads').insert(download_record).execute()
+                # Use upsert to avoid duplicate key constraint violations
+                sb().table('fl_model_downloads').upsert(
+                    download_record, 
+                    on_conflict='lab_label,global_model_version'
+                ).execute()
                 print(f"Download tracked for {lab_label}, version {latest_global['version']}")
                 if accuracy_before and global_accuracy:
                     print(f"  Accuracy improvement: {accuracy_before:.4f} → {global_accuracy:.4f} ({improvement:+.2f}%)")
@@ -1964,7 +2366,11 @@ def run_ab_test():
         for i, record in enumerate(test_records):
             # Encode features
             X = _encode_row_from_db(record)
-            actual_label = record.get('disease_label', 0)
+            # Support both 'disease_label' and 'diagnosis' field names
+            actual_label = record.get('disease_label')
+            if actual_label is None:
+                actual_label = record.get('diagnosis', 0)
+            actual_label = int(actual_label) if actual_label is not None else 0
             
             # Standardize features
             scaler = StandardScaler()
@@ -2277,12 +2683,18 @@ def create_test_dataset():
         for idx in test_indices:
             record = records.data[idx]
             
+            # Get diagnosis - support both field names
+            diagnosis_val = record.get('disease_label')
+            if diagnosis_val is None:
+                diagnosis_val = record.get('diagnosis', 0)
+            diagnosis_val = int(diagnosis_val) if diagnosis_val is not None else 0
+            
             # Create test record
             sb().table('fl_test_patient_records').insert({
                 'original_record_id': record.get('id'),
                 'lab_label': record.get('lab_label'),
                 'patient_data': record,
-                'actual_diagnosis': ['healthy', 'diabetes', 'hypertension', 'heart_disease'][record.get('disease_label', 0)],
+                'actual_diagnosis': ['healthy', 'diabetes', 'hypertension', 'heart_disease'][diagnosis_val],
                 'is_active': True
             }).execute()
             test_records_created += 1

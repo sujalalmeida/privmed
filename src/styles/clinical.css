@@ -1,0 +1,355 @@
+/**
+ * Clinical Data Entry Styles
+ * 
+ * Provides a professional medical/clinical appearance for the data entry form.
+ */
+
+/* ============================================================================
+   Section Styling
+   ============================================================================ */
+
+.clinical-section {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.clinical-section h3 {
+  color: #1a365d;
+  border-bottom: 2px solid #3182ce;
+  padding-bottom: 8px;
+  margin-bottom: 16px;
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.clinical-section h4,
+.subsection-title {
+  color: #4a5568;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ============================================================================
+   Form Row Styling
+   ============================================================================ */
+
+.form-row {
+  display: grid;
+  grid-template-columns: 150px 120px auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.form-row:last-child {
+  border-bottom: none;
+}
+
+.form-row label {
+  font-weight: 500;
+  color: #4a5568;
+  font-size: 14px;
+}
+
+.form-row input,
+.form-row select {
+  padding: 8px 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  outline: none;
+  border-color: #3182ce;
+  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+}
+
+.form-row input:disabled {
+  background-color: #f7fafc;
+  color: #718096;
+  cursor: not-allowed;
+}
+
+.form-row input[type="number"] {
+  width: 100%;
+}
+
+.form-row.calculated {
+  background-color: #f7fafc;
+  border-radius: 4px;
+  padding: 10px;
+  margin: 4px 0;
+}
+
+/* ============================================================================
+   Units and Reference Values
+   ============================================================================ */
+
+.unit {
+  color: #718096;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.reference {
+  color: #a0aec0;
+  font-size: 12px;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   Status Indicators
+   ============================================================================ */
+
+.status-normal {
+  color: #38a169;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.status-warning {
+  color: #d69e2e;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.status-critical {
+  color: #e53e3e;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+/* ============================================================================
+   Checkbox Groups
+   ============================================================================ */
+
+.checkbox-group {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.checkbox-group h4 {
+  grid-column: 1 / -1;
+  margin-bottom: 8px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #4a5568;
+  padding: 4px 0;
+}
+
+.checkbox-label:hover {
+  color: #2d3748;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #3182ce;
+}
+
+/* ============================================================================
+   Blood Pressure Special Inputs
+   ============================================================================ */
+
+.bp-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bp-inputs input {
+  width: 70px !important;
+  text-align: center;
+}
+
+.bp-inputs span {
+  color: #718096;
+  font-weight: bold;
+}
+
+/* ============================================================================
+   Radio Groups
+   ============================================================================ */
+
+.radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.radio-group input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #3182ce;
+}
+
+/* ============================================================================
+   Diagnosis Result Section
+   ============================================================================ */
+
+.diagnosis-result {
+  border: 2px solid #3182ce;
+}
+
+.diagnosis-result h3 {
+  color: #2b6cb0;
+  border-color: #2b6cb0;
+}
+
+/* ============================================================================
+   Clinical Data Entry Container
+   ============================================================================ */
+
+.clinical-data-entry {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* ============================================================================
+   Responsive Adjustments
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .form-row label {
+    font-weight: 600;
+  }
+  
+  .checkbox-group {
+    grid-template-columns: 1fr;
+  }
+  
+  .bp-inputs {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 1024px) {
+  .form-row {
+    grid-template-columns: 140px 100px auto auto;
+  }
+}
+
+/* ============================================================================
+   Section-Specific Styling
+   ============================================================================ */
+
+.vital-signs {
+  border-left: 4px solid #e53e3e;
+}
+
+.vital-signs h3 {
+  color: #c53030;
+  border-color: #e53e3e;
+}
+
+.blood-chemistry {
+  border-left: 4px solid #805ad5;
+}
+
+.blood-chemistry h3 {
+  color: #6b46c1;
+  border-color: #805ad5;
+}
+
+.cardiac {
+  border-left: 4px solid #ed8936;
+}
+
+.cardiac h3 {
+  color: #c05621;
+  border-color: #ed8936;
+}
+
+.medical-history {
+  border-left: 4px solid #38a169;
+}
+
+.medical-history h3 {
+  color: #276749;
+  border-color: #38a169;
+}
+
+.medications {
+  border-left: 4px solid #4299e1;
+}
+
+.medications h3 {
+  color: #2b6cb0;
+  border-color: #4299e1;
+}
+
+/* ============================================================================
+   Animation for Loading State
+   ============================================================================ */
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.loading-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ============================================================================
+   Print Styles
+   ============================================================================ */
+
+@media print {
+  .clinical-section {
+    break-inside: avoid;
+    box-shadow: none;
+    border: 1px solid #000;
+  }
+  
+  button {
+    display: none !important;
+  }
+  
+  .clinical-data-entry {
+    max-width: none;
+    padding: 0;
+  }
+}

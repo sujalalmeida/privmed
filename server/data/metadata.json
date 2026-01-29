@@ -1,0 +1,218 @@
+{
+  "total_samples": 2000,
+  "train_samples": 1400,
+  "validation_samples": 300,
+  "test_samples": 300,
+  "class_distribution": {
+    "healthy": 500,
+    "diabetes": 500,
+    "hypertension": 500,
+    "heart_disease": 500
+  },
+  "class_names": [
+    "healthy",
+    "diabetes",
+    "hypertension",
+    "heart_disease"
+  ],
+  "feature_ranges": {
+    "age": {
+      "min": 18.0,
+      "max": 79.0,
+      "mean": 49.101,
+      "std": 15.441308753081909
+    },
+    "bmi": {
+      "min": 16.07454795195357,
+      "max": 67.1,
+      "mean": 29.166275676356893,
+      "std": 6.214858368016005
+    },
+    "systolic_bp": {
+      "min": 85.0,
+      "max": 211.0,
+      "mean": 141.1385,
+      "std": 20.517719321432306
+    },
+    "diastolic_bp": {
+      "min": 30.0,
+      "max": 130.0,
+      "mean": 83.4215,
+      "std": 13.446830346709465
+    },
+    "heart_rate": {
+      "min": 35.0,
+      "max": 106.0,
+      "mean": 73.0435,
+      "std": 10.0722556022203
+    },
+    "fasting_glucose": {
+      "min": 57.0,
+      "max": 199.0,
+      "mean": 110.3805,
+      "std": 26.99049764697968
+    },
+    "hba1c": {
+      "min": 3.613240418118467,
+      "max": 8.560975609756097,
+      "mean": 5.510311149825784,
+      "std": 0.8608856464761958
+    },
+    "total_cholesterol": {
+      "min": 100.0,
+      "max": 409.0,
+      "mean": 215.817,
+      "std": 41.335370052882126
+    },
+    "max_heart_rate": {
+      "min": 71.0,
+      "max": 202.0,
+      "mean": 164.2585,
+      "std": 24.07616058478287
+    },
+    "st_depression": {
+      "min": 0.0,
+      "max": 6.2,
+      "mean": 0.431,
+      "std": 0.9451061383815065
+    }
+  },
+  "reference_ranges": {
+    "fasting_glucose": {
+      "normal": [
+        70,
+        100
+      ],
+      "prediabetes": [
+        100,
+        126
+      ],
+      "diabetes": [
+        126,
+        400
+      ]
+    },
+    "systolic_bp": {
+      "normal": [
+        90,
+        120
+      ],
+      "elevated": [
+        120,
+        130
+      ],
+      "high_stage1": [
+        130,
+        140
+      ],
+      "high_stage2": [
+        140,
+        180
+      ],
+      "crisis": [
+        180,
+        300
+      ]
+    },
+    "diastolic_bp": {
+      "normal": [
+        60,
+        80
+      ],
+      "high_stage1": [
+        80,
+        90
+      ],
+      "high_stage2": [
+        90,
+        120
+      ],
+      "crisis": [
+        120,
+        180
+      ]
+    },
+    "hba1c": {
+      "normal": [
+        4.0,
+        5.7
+      ],
+      "prediabetes": [
+        5.7,
+        6.5
+      ],
+      "diabetes": [
+        6.5,
+        14.0
+      ]
+    },
+    "total_cholesterol": {
+      "desirable": [
+        0,
+        200
+      ],
+      "borderline": [
+        200,
+        240
+      ],
+      "high": [
+        240,
+        400
+      ]
+    },
+    "bmi": {
+      "underweight": [
+        0,
+        18.5
+      ],
+      "normal": [
+        18.5,
+        25
+      ],
+      "overweight": [
+        25,
+        30
+      ],
+      "obese": [
+        30,
+        100
+      ]
+    }
+  },
+  "feature_columns": [
+    "age",
+    "bmi",
+    "systolic_bp",
+    "diastolic_bp",
+    "heart_rate",
+    "fasting_glucose",
+    "hba1c",
+    "total_cholesterol",
+    "ldl_cholesterol",
+    "hdl_cholesterol",
+    "triglycerides",
+    "max_heart_rate",
+    "st_depression",
+    "sex_encoded",
+    "chest_pain_type",
+    "resting_ecg",
+    "exercise_angina",
+    "st_slope",
+    "smoking_status",
+    "family_history_cvd",
+    "family_history_diabetes",
+    "prior_hypertension",
+    "prior_diabetes",
+    "prior_heart_disease",
+    "on_bp_medication",
+    "on_diabetes_medication",
+    "on_cholesterol_medication"
+  ],
+  "created_at": "2026-01-29T19:52:44.761162",
+  "sources": [
+    "heart_uci",
+    "pima_diabetes",
+    "hypertension_synthetic",
+    "healthy_synthetic"
+  ]
+}

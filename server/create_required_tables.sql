@@ -3,33 +3,91 @@
 
 create extension if not exists pgcrypto;
 
--- Stores per-lab patient records used for local training.
-create table if not exists public.patient_records (
+-- ============================================================================
+-- Drop old patient_records table if it exists (schema update)
+-- ============================================================================
+drop table if exists public.patient_records cascade;
+
+-- ============================================================================
+-- Create new patient_records with clinical schema
+-- ============================================================================
+create table public.patient_records (
   id uuid primary key default gen_random_uuid(),
   created_at timestamptz not null default now(),
-
   lab_label text not null,
-
-  age int,
+  
+  -- Demographics
+  patient_id text,
+  age int not null,
+  sex text not null default 'M',
+  height_cm float,
+  weight_kg float,
+  bmi float,
+  
+  -- Vital Signs
+  systolic_bp int,
+  diastolic_bp int,
+  heart_rate int,
+  
+  -- Blood Chemistry - Glucose Metabolism
+  fasting_glucose int,
+  hba1c float,
+  insulin float,
+  
+  -- Blood Chemistry - Lipid Panel
+  total_cholesterol int,
+  ldl_cholesterol int,
+  hdl_cholesterol int,
+  triglycerides int,
+  
+  -- Cardiac Assessment
+  chest_pain_type int,     -- 1=typical angina, 2=atypical, 3=non-anginal, 4=asymptomatic
+  resting_ecg int,         -- 0=normal, 1=ST-T abnormality, 2=LVH
+  max_heart_rate int,
+  exercise_angina int,     -- 0=no, 1=yes
+  st_depression float,
+  st_slope int,            -- 1=upsloping, 2=flat, 3=downsloping
+  
+  -- Medical History (binary flags)
+  smoking_status int,      -- 0=never, 1=former, 2=current
+  family_history_cvd int,
+  family_history_diabetes int,
+  prior_hypertension int,
+  prior_diabetes int,
+  prior_heart_disease int,
+  
+  -- Medications (binary flags)
+  on_bp_medication int,
+  on_diabetes_medication int,
+  on_cholesterol_medication int,
+  
+  -- Prediction Results
+  diagnosis int,           -- 0=healthy, 1=diabetes, 2=hypertension, 3=heart_disease
+  diagnosis_label text,
+  confidence float,
+  probabilities jsonb,
+  
+  -- Legacy columns for backward compatibility
   gender text,
   blood_type text,
   discomfort_level int,
   symptom_duration int,
   prior_conditions text,
-
-  bmi double precision,
-  smoker_status text,
-  heart_rate int,
   bp_sys int,
   bp_dia int,
   cholesterol int,
   glucose int,
   family_history text,
   medication_use text,
-
   disease_label int,
-  disease_type text
+  disease_type text,
+  smoker_status text
 );
+
+-- Indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_patient_records_lab ON public.patient_records(lab_label);
+CREATE INDEX IF NOT EXISTS idx_patient_records_diagnosis ON public.patient_records(diagnosis);
+CREATE INDEX IF NOT EXISTS idx_patient_records_created ON public.patient_records(created_at DESC);
 
 -- Stores client-side (lab) model update metadata.
 create table if not exists public.fl_client_updates (
