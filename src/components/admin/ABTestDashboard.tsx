@@ -212,15 +212,15 @@ export default function ABTestDashboard() {
     if (!matrix) return null;
 
     return (
-      <div className="bg-white rounded-lg p-4 shadow">
-        <h4 className="text-sm font-semibold text-gray-700 mb-3">{title}</h4>
+      <div className="card p-4">
+        <h4 className="text-sm font-semibold text-neutral-700 mb-3">{title}</h4>
         <div className="overflow-x-auto">
           <table className="text-xs">
             <thead>
               <tr>
                 <th className="p-1"></th>
                 {diseaseLabels.map(label => (
-                  <th key={label} className="p-1 text-center font-medium text-gray-600 truncate max-w-[60px]">
+                  <th key={label} className="p-1 text-center font-medium text-neutral-600 truncate max-w-[60px]">
                     {label.slice(0, 4)}
                   </th>
                 ))}
@@ -229,7 +229,7 @@ export default function ABTestDashboard() {
             <tbody>
               {matrix.map((row, i) => (
                 <tr key={i}>
-                  <td className="p-1 font-medium text-gray-600 truncate max-w-[60px]">
+                  <td className="p-1 font-medium text-neutral-600 truncate max-w-[60px]">
                     {diseaseLabels[i].slice(0, 4)}
                   </td>
                   {row.map((cell, j) => (
@@ -239,8 +239,8 @@ export default function ABTestDashboard() {
                         i === j
                           ? `${colorClass} text-white font-bold`
                           : cell > 0
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-gray-50 text-gray-400'
+                          ? 'bg-error-100 text-error-800'
+                          : 'bg-neutral-50 text-neutral-400'
                       }`}
                     >
                       {cell}
@@ -251,7 +251,7 @@ export default function ABTestDashboard() {
             </tbody>
           </table>
         </div>
-        <p className="text-xs text-gray-500 mt-2">Rows: Actual | Cols: Predicted</p>
+        <p className="text-xs text-neutral-500 mt-2">Rows: Actual | Cols: Predicted</p>
       </div>
     );
   };
@@ -261,24 +261,24 @@ export default function ABTestDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center">
-            <FlaskConical className="w-7 h-7 mr-3 text-purple-600" />
+          <h2 className="text-2xl font-bold text-neutral-900 flex items-center">
+            <FlaskConical className="w-7 h-7 mr-3 text-primary-500" />
             A/B Test Dashboard
           </h2>
-          <p className="text-gray-600 mt-1">
+          <p className="text-neutral-600 mt-1">
             Compare local vs. global federated models to measure FL improvement
           </p>
         </div>
         <button
           onClick={loadAvailableModels}
-          className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+          className="p-2 text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 rounded-lg transition-colors"
         >
           <RefreshCw className="w-5 h-5" />
         </button>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
+      <div className="border-b border-neutral-200">
         <nav className="-mb-px flex space-x-8">
           {[
             { id: 'configure', label: 'Configure Test', icon: Beaker },
@@ -292,8 +292,8 @@ export default function ABTestDashboard() {
                 onClick={() => setActiveTab(tab.id as any)}
                 className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === tab.id
-                    ? 'border-purple-500 text-purple-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? 'border-primary-500 text-primary-600'
+                    : 'border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300'
                 }`}
               >
                 <Icon className="w-5 h-5 mr-2" />
@@ -305,7 +305,7 @@ export default function ABTestDashboard() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700 flex items-start">
+        <div className="alert-error">
           <AlertCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
           <span>{error}</span>
         </div>
@@ -315,30 +315,30 @@ export default function ABTestDashboard() {
       {activeTab === 'configure' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Test Configuration */}
-          <div className="lg:col-span-2 bg-white rounded-lg shadow-lg p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-4">Test Configuration</h3>
+          <div className="lg:col-span-2 card p-6">
+            <h3 className="text-lg font-bold text-neutral-900 mb-4">Test Configuration</h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Test Name</label>
+                <label className="block text-sm font-medium text-neutral-700 mb-1">Test Name</label>
                 <input
                   type="text"
                   value={testName}
                   onChange={(e) => setTestName(e.target.value)}
                   placeholder="e.g., Lab A vs Global v5"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="form-input"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-neutral-700 mb-1">
                     Model A (Baseline)
                   </label>
                   <select
                     value={selectedModelA}
                     onChange={(e) => setSelectedModelA(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="form-input"
                   >
                     <option value="">Select Model A...</option>
                     <optgroup label="Local Lab Models">
@@ -359,13 +359,13 @@ export default function ABTestDashboard() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-neutral-700 mb-1">
                     Model B (Challenger)
                   </label>
                   <select
                     value={selectedModelB}
                     onChange={(e) => setSelectedModelB(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    className="form-input"
                   >
                     <option value="">Select Model B...</option>
                     <optgroup label="Global Models">
@@ -392,9 +392,9 @@ export default function ABTestDashboard() {
                   id="useHeldOut"
                   checked={useHeldOut}
                   onChange={(e) => setUseHeldOut(e.target.checked)}
-                  className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                  className="w-4 h-4 text-primary-500 border-neutral-300 rounded focus:ring-primary-500"
                 />
-                <label htmlFor="useHeldOut" className="ml-2 text-sm text-gray-700">
+                <label htmlFor="useHeldOut" className="ml-2 text-sm text-neutral-700">
                   Use held-out test dataset (recommended for unbiased comparison)
                 </label>
               </div>
@@ -402,9 +402,7 @@ export default function ABTestDashboard() {
               <button
                 onClick={handleRunTest}
                 disabled={isRunning || !selectedModelA || !selectedModelB}
-                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold
-                         hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-500 
-                         disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center shadow-lg"
+                className="btn-primary w-full py-3 flex items-center justify-center"
               >
                 {isRunning ? (
                   <>
@@ -422,30 +420,30 @@ export default function ABTestDashboard() {
           </div>
 
           {/* Test Dataset Info */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
-              <Database className="w-5 h-5 mr-2 text-blue-600" />
+          <div className="card p-6">
+            <h3 className="text-lg font-bold text-neutral-900 mb-4 flex items-center">
+              <Database className="w-5 h-5 mr-2 text-primary-500" />
               Test Dataset
             </h3>
             
             {testDatasetInfo?.has_test_dataset ? (
               <div className="space-y-4">
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center text-green-700 font-medium mb-2">
+                <div className="p-4 bg-success-50 rounded-lg border border-success-200">
+                  <div className="flex items-center text-success-700 font-medium mb-2">
                     <CheckCircle className="w-5 h-5 mr-2" />
                     Held-out Dataset Ready
                   </div>
-                  <p className="text-sm text-green-600">
+                  <p className="text-sm text-success-600">
                     {testDatasetInfo.num_samples} test samples available
                   </p>
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-medium text-gray-700 mb-2">Diagnosis Distribution</h4>
+                  <h4 className="text-sm font-medium text-neutral-700 mb-2">Diagnosis Distribution</h4>
                   <div className="space-y-1">
                     {Object.entries(testDatasetInfo.diagnosis_distribution || {}).map(([diagnosis, count]) => (
                       <div key={diagnosis} className="flex justify-between text-sm">
-                        <span className="text-gray-600 capitalize">{diagnosis}</span>
+                        <span className="text-neutral-600 capitalize">{diagnosis}</span>
                         <span className="font-medium">{count as number}</span>
                       </div>
                     ))}
@@ -454,12 +452,12 @@ export default function ABTestDashboard() {
               </div>
             ) : (
               <div className="text-center py-4">
-                <Database className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p className="text-gray-600 mb-4">No held-out test dataset</p>
+                <Database className="w-12 h-12 mx-auto mb-3 text-neutral-300" />
+                <p className="text-neutral-600 mb-4">No held-out test dataset</p>
                 <button
                   onClick={handleCreateTestDataset}
                   disabled={isCreatingTestSet}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 text-sm font-medium"
+                  className="btn-primary text-sm"
                 >
                   {isCreatingTestSet ? 'Creating...' : 'Create Test Dataset (20%)'}
                 </button>
@@ -474,40 +472,40 @@ export default function ABTestDashboard() {
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg p-6 text-white">
-              <div className="text-sm opacity-90 mb-1">Model A ({currentResult.model_a_type})</div>
-              <div className="text-3xl font-bold">
+            <div className="card p-5 border-l-3 border-l-primary-500">
+              <div className="text-sm text-neutral-600 mb-1">Model A ({currentResult.model_a_type})</div>
+              <div className="text-3xl font-bold text-neutral-900">
                 {((currentResult.model_a_accuracy || 0) * 100).toFixed(1)}%
               </div>
-              <div className="text-sm opacity-75 mt-1">{currentResult.model_a_version}</div>
+              <div className="text-sm text-neutral-500 mt-1">{currentResult.model_a_version}</div>
             </div>
 
-            <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg shadow-lg p-6 text-white">
-              <div className="text-sm opacity-90 mb-1">Model B ({currentResult.model_b_type})</div>
-              <div className="text-3xl font-bold">
+            <div className="card p-5 border-l-3 border-l-success-500">
+              <div className="text-sm text-neutral-600 mb-1">Model B ({currentResult.model_b_type})</div>
+              <div className="text-3xl font-bold text-neutral-900">
                 {((currentResult.model_b_accuracy || 0) * 100).toFixed(1)}%
               </div>
-              <div className="text-sm opacity-75 mt-1">{currentResult.model_b_version}</div>
+              <div className="text-sm text-neutral-500 mt-1">{currentResult.model_b_version}</div>
             </div>
 
-            <div className={`rounded-lg shadow-lg p-6 text-white ${
+            <div className={`card p-5 border-l-3 ${
               (currentResult.accuracy_delta || 0) > 0
-                ? 'bg-gradient-to-br from-purple-500 to-indigo-600'
+                ? 'border-l-heart-disease'
                 : (currentResult.accuracy_delta || 0) < 0
-                ? 'bg-gradient-to-br from-orange-500 to-red-600'
-                : 'bg-gradient-to-br from-gray-500 to-gray-600'
+                ? 'border-l-warning-500'
+                : 'border-l-neutral-400'
             }`}>
-              <div className="text-sm opacity-90 mb-1">FL Improvement</div>
-              <div className="text-3xl font-bold flex items-center">
+              <div className="text-sm text-neutral-600 mb-1">FL Improvement</div>
+              <div className="text-3xl font-bold text-neutral-900 flex items-center">
                 {(currentResult.accuracy_delta || 0) > 0 ? (
-                  <TrendingUp className="w-8 h-8 mr-2" />
+                  <TrendingUp className="w-8 h-8 mr-2 text-success-500" />
                 ) : (currentResult.accuracy_delta || 0) < 0 ? (
-                  <TrendingDown className="w-8 h-8 mr-2" />
+                  <TrendingDown className="w-8 h-8 mr-2 text-warning-500" />
                 ) : null}
                 {(currentResult.accuracy_delta || 0) > 0 ? '+' : ''}
                 {((currentResult.accuracy_delta || 0) * 100).toFixed(2)}%
               </div>
-              <div className="text-sm opacity-75 mt-1">
+              <div className="text-sm text-neutral-500 mt-1">
                 {currentResult.statistical_significance?.is_significant 
                   ? `p < 0.05 (Significant)` 
                   : `p = ${currentResult.statistical_significance?.p_value?.toFixed(3) || 'N/A'}`}
@@ -518,51 +516,51 @@ export default function ABTestDashboard() {
           {/* Winner Banner */}
           <div className={`p-4 rounded-lg border-2 ${
             currentResult.winner?.includes('Model B') || currentResult.winner?.includes('Global')
-              ? 'bg-green-50 border-green-300'
+              ? 'bg-success-50 border-success-300'
               : currentResult.winner?.includes('Model A')
-              ? 'bg-blue-50 border-blue-300'
-              : 'bg-gray-50 border-gray-300'
+              ? 'bg-primary-50 border-primary-300'
+              : 'bg-neutral-100 border-neutral-300'
           }`}>
             <div className="flex items-center justify-center text-lg font-semibold">
               {currentResult.winner?.includes('Model B') || currentResult.winner?.includes('Global') ? (
                 <>
-                  <CheckCircle className="w-6 h-6 mr-2 text-green-600" />
-                  <span className="text-green-700">
+                  <CheckCircle className="w-6 h-6 mr-2 text-success-600" />
+                  <span className="text-success-700">
                     🎉 Global Federated Model Wins! FL improves accuracy by {((currentResult.accuracy_delta || 0) * 100).toFixed(2)}%
                   </span>
                 </>
               ) : currentResult.winner?.includes('Model A') ? (
                 <>
-                  <AlertCircle className="w-6 h-6 mr-2 text-blue-600" />
-                  <span className="text-blue-700">
+                  <AlertCircle className="w-6 h-6 mr-2 text-primary-600" />
+                  <span className="text-primary-700">
                     Local model performs better. Consider more FL rounds or data.
                   </span>
                 </>
               ) : (
-                <span className="text-gray-700">Models perform equally</span>
+                <span className="text-neutral-700">Models perform equally</span>
               )}
             </div>
           </div>
 
           {/* Confusion Matrices */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {renderConfusionMatrix(currentResult.confusion_matrix_a, 'Model A Confusion Matrix', 'bg-blue-500')}
-            {renderConfusionMatrix(currentResult.confusion_matrix_b, 'Model B Confusion Matrix', 'bg-green-500')}
+            {renderConfusionMatrix(currentResult.confusion_matrix_a, 'Model A Confusion Matrix', 'bg-primary-500')}
+            {renderConfusionMatrix(currentResult.confusion_matrix_b, 'Model B Confusion Matrix', 'bg-success-500')}
           </div>
 
           {/* Per-Patient Comparison Table */}
-          <div className="bg-white rounded-lg shadow-lg p-6">
+          <div className="card p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-gray-900 flex items-center">
-                <Table className="w-5 h-5 mr-2 text-gray-600" />
+              <h3 className="text-lg font-bold text-neutral-900 flex items-center">
+                <Table className="w-5 h-5 mr-2 text-neutral-600" />
                 Per-Patient Comparison
               </h3>
-              <label className="flex items-center text-sm text-gray-600">
+              <label className="flex items-center text-sm text-neutral-600">
                 <input
                   type="checkbox"
                   checked={showDisagreementsOnly}
                   onChange={(e) => setShowDisagreementsOnly(e.target.checked)}
-                  className="mr-2 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                  className="mr-2 rounded border-neutral-300 text-primary-500 focus:ring-primary-500"
                 />
                 <Filter className="w-4 h-4 mr-1" />
                 Show disagreements only
@@ -570,18 +568,18 @@ export default function ABTestDashboard() {
             </div>
 
             <div className="overflow-x-auto max-h-96">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0">
+              <table className="min-w-full divide-y divide-neutral-200">
+                <thead className="bg-neutral-50 sticky top-0">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Patient</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actual</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model A</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model B</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">A ✓</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">B ✓</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Patient</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Actual</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Model A</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Model B</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-neutral-500 uppercase">A ✓</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-neutral-500 uppercase">B ✓</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-neutral-200">
                   {(currentResult.model_a_predictions || [])
                     .filter((predA, idx) => {
                       if (!showDisagreementsOnly) return true;
@@ -596,38 +594,38 @@ export default function ABTestDashboard() {
                       return (
                         <tr 
                           key={predA.patient_id} 
-                          className={`${isDisagreement ? 'bg-yellow-50' : ''} hover:bg-gray-50`}
+                          className={`${isDisagreement ? 'bg-warning-50' : ''} hover:bg-neutral-50`}
                         >
-                          <td className="px-4 py-2 text-sm text-gray-900">#{predA.patient_id}</td>
-                          <td className="px-4 py-2 text-sm font-medium text-gray-900 capitalize">{predA.actual}</td>
+                          <td className="px-4 py-2 text-sm text-neutral-900">#{predA.patient_id}</td>
+                          <td className="px-4 py-2 text-sm font-medium text-neutral-900 capitalize">{predA.actual}</td>
                           <td className="px-4 py-2 text-sm">
-                            <span className={`capitalize ${predA.correct ? 'text-green-600' : 'text-red-600'}`}>
+                            <span className={`capitalize ${predA.correct ? 'text-success-600' : 'text-error-600'}`}>
                               {predA.predicted}
                             </span>
-                            <span className="text-gray-400 text-xs ml-1">
+                            <span className="text-neutral-400 text-xs ml-1">
                               ({(predA.confidence * 100).toFixed(0)}%)
                             </span>
                           </td>
                           <td className="px-4 py-2 text-sm">
-                            <span className={`capitalize ${predB?.correct ? 'text-green-600' : 'text-red-600'}`}>
+                            <span className={`capitalize ${predB?.correct ? 'text-success-600' : 'text-error-600'}`}>
                               {predB?.predicted}
                             </span>
-                            <span className="text-gray-400 text-xs ml-1">
+                            <span className="text-neutral-400 text-xs ml-1">
                               ({((predB?.confidence || 0) * 100).toFixed(0)}%)
                             </span>
                           </td>
                           <td className="px-4 py-2 text-center">
                             {predA.correct ? (
-                              <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />
+                              <CheckCircle className="w-5 h-5 text-success-500 mx-auto" />
                             ) : (
-                              <XCircle className="w-5 h-5 text-red-400 mx-auto" />
+                              <XCircle className="w-5 h-5 text-error-400 mx-auto" />
                             )}
                           </td>
                           <td className="px-4 py-2 text-center">
                             {predB?.correct ? (
-                              <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />
+                              <CheckCircle className="w-5 h-5 text-success-500 mx-auto" />
                             ) : (
-                              <XCircle className="w-5 h-5 text-red-400 mx-auto" />
+                              <XCircle className="w-5 h-5 text-error-400 mx-auto" />
                             )}
                           </td>
                         </tr>
@@ -636,7 +634,7 @@ export default function ABTestDashboard() {
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-neutral-500 mt-2">
               Showing {Math.min(50, (currentResult.model_a_predictions || []).filter((predA, idx) => {
                 if (!showDisagreementsOnly) return true;
                 const predB = currentResult.model_b_predictions?.[idx];
@@ -648,88 +646,88 @@ export default function ABTestDashboard() {
       )}
 
       {activeTab === 'results' && !currentResult && (
-        <div className="text-center py-12 bg-white rounded-lg shadow">
-          <BarChart3 className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-          <p className="text-gray-600">No test results yet</p>
-          <p className="text-sm text-gray-500 mt-1">Run an A/B test to see results here</p>
+        <div className="text-center py-12 card">
+          <BarChart3 className="w-16 h-16 mx-auto mb-4 text-neutral-300" />
+          <p className="text-neutral-600">No test results yet</p>
+          <p className="text-sm text-neutral-500 mt-1">Run an A/B test to see results here</p>
         </div>
       )}
 
       {/* History Tab */}
       {activeTab === 'history' && (
-        <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-bold text-gray-900">Test History</h3>
+        <div className="card overflow-hidden">
+          <div className="px-6 py-4 border-b border-neutral-200">
+            <h3 className="text-lg font-bold text-neutral-900">Test History</h3>
           </div>
           
           {testHistory.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <Clock className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <div className="text-center py-12 text-neutral-500">
+              <Clock className="w-12 h-12 mx-auto mb-3 text-neutral-300" />
               <p>No A/B tests run yet</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+              <table className="min-w-full divide-y divide-neutral-200">
+                <thead className="bg-neutral-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Test Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model A</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Model B</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Winner</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Δ Accuracy</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Samples</th>
-                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Date</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Test Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Model A</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase">Model B</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-neutral-500 uppercase">Winner</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-neutral-500 uppercase">Δ Accuracy</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-neutral-500 uppercase">Samples</th>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-neutral-500 uppercase">Action</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white divide-y divide-neutral-200">
                   {testHistory.map((test) => (
-                    <tr key={test.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <tr key={test.id} className="hover:bg-neutral-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
                         {new Date(test.created_at).toLocaleDateString()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-neutral-900">
                         {test.test_name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
                         {test.model_a_type}: {test.model_a_version}
-                        <span className="ml-2 text-blue-600">
+                        <span className="ml-2 text-primary-600">
                           {((test.model_a_accuracy || 0) * 100).toFixed(1)}%
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
                         {test.model_b_type}: {test.model_b_version}
-                        <span className="ml-2 text-green-600">
+                        <span className="ml-2 text-success-600">
                           {((test.model_b_accuracy || 0) * 100).toFixed(1)}%
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${
                           test.winner?.includes('Model B') || test.winner?.includes('Global')
-                            ? 'bg-green-100 text-green-800'
+                            ? 'badge-success'
                             : test.winner?.includes('Model A')
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-gray-100 text-gray-800'
+                            ? 'bg-primary-100 text-primary-800'
+                            : 'badge-neutral'
                         }`}>
                           {test.winner}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
                         <span className={`font-medium ${
-                          (test.accuracy_delta || 0) > 0 ? 'text-green-600' : 
-                          (test.accuracy_delta || 0) < 0 ? 'text-red-600' : 'text-gray-600'
+                          (test.accuracy_delta || 0) > 0 ? 'text-success-600' : 
+                          (test.accuracy_delta || 0) < 0 ? 'text-error-600' : 'text-neutral-600'
                         }`}>
                           {(test.accuracy_delta || 0) > 0 ? '+' : ''}
                           {((test.accuracy_delta || 0) * 100).toFixed(2)}%
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
+                      <td className="px-6 py-4 whitespace-nowrap text-center text-sm text-neutral-500">
                         {test.num_samples}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center">
                         <button
                           onClick={() => loadHistoryTestDetails(test.id)}
-                          className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+                          className="text-primary-600 hover:text-primary-800 text-sm font-medium"
                         >
                           View Details
                         </button>

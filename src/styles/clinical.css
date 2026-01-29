@@ -1,42 +1,60 @@
 /**
  * Clinical Data Entry Styles
  * 
- * Provides a professional medical/clinical appearance for the data entry form.
+ * MedSafe Design System - Professional clinical appearance
  */
+
+/* ============================================================================
+   CSS Variables (aligned with Tailwind theme)
+   ============================================================================ */
+
+:root {
+  --clinical-primary: #0F6E66;
+  --clinical-primary-light: #EFFAF9;
+  --clinical-border: #E2E8EA;
+  --clinical-border-subtle: #F0F4F5;
+  --clinical-text: #0F172A;
+  --clinical-text-secondary: #4A5B61;
+  --clinical-text-muted: #6B7D84;
+  --clinical-bg: #FFFFFF;
+  --clinical-bg-sunken: #F7FAFB;
+  --clinical-radius: 6px;
+  --clinical-radius-lg: 8px;
+}
 
 /* ============================================================================
    Section Styling
    ============================================================================ */
 
 .clinical-section {
-  background: #fff;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 20px;
+  background: var(--clinical-bg);
+  border: 1px solid var(--clinical-border);
+  border-radius: var(--clinical-radius-lg);
+  padding: 24px;
   margin-bottom: 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
 }
 
 .clinical-section h3 {
-  color: #1a365d;
-  border-bottom: 2px solid #3182ce;
-  padding-bottom: 8px;
-  margin-bottom: 16px;
-  font-size: 16px;
+  color: var(--clinical-text);
+  border-bottom: 1px solid var(--clinical-border);
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+  font-size: 14px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.05em;
   font-weight: 600;
 }
 
 .clinical-section h4,
 .subsection-title {
-  color: #4a5568;
+  color: var(--clinical-text-secondary);
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 12px;
-  margin-top: 8px;
+  margin-top: 16px;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.03em;
 }
 
 /* ============================================================================
@@ -45,11 +63,11 @@
 
 .form-row {
   display: grid;
-  grid-template-columns: 150px 120px auto auto auto;
+  grid-template-columns: 160px 130px auto auto auto;
   align-items: center;
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--clinical-border-subtle);
 }
 
 .form-row:last-child {
@@ -58,30 +76,37 @@
 
 .form-row label {
   font-weight: 500;
-  color: #4a5568;
+  color: var(--clinical-text-secondary);
   font-size: 14px;
 }
 
 .form-row input,
 .form-row select {
-  padding: 8px 12px;
-  border: 1px solid #cbd5e0;
-  border-radius: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--clinical-border);
+  border-radius: var(--clinical-radius);
   font-size: 14px;
-  background-color: #fff;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+  background-color: var(--clinical-bg);
+  color: var(--clinical-text);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.form-row input:hover,
+.form-row select:hover {
+  border-color: #C8D1D4;
 }
 
 .form-row input:focus,
 .form-row select:focus {
   outline: none;
-  border-color: #3182ce;
-  box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+  border-color: var(--clinical-primary);
+  box-shadow: 0 0 0 3px rgba(15, 110, 102, 0.12);
 }
 
 .form-row input:disabled {
-  background-color: #f7fafc;
-  color: #718096;
+  background-color: var(--clinical-bg-sunken);
+  color: var(--clinical-text-muted);
   cursor: not-allowed;
 }
 
@@ -90,9 +115,9 @@
 }
 
 .form-row.calculated {
-  background-color: #f7fafc;
-  border-radius: 4px;
-  padding: 10px;
+  background-color: var(--clinical-bg-sunken);
+  border-radius: var(--clinical-radius);
+  padding: 12px;
   margin: 4px 0;
 }
 
@@ -101,15 +126,15 @@
    ============================================================================ */
 
 .unit {
-  color: #718096;
+  color: var(--clinical-text-muted);
   font-size: 13px;
   white-space: nowrap;
 }
 
 .reference {
-  color: #a0aec0;
+  color: #9AA8AD;
   font-size: 12px;
-  font-style: italic;
+  font-style: normal;
   white-space: nowrap;
 }
 
@@ -118,19 +143,19 @@
    ============================================================================ */
 
 .status-normal {
-  color: #38a169;
+  color: #137F2E;
   font-weight: 500;
   font-size: 13px;
 }
 
 .status-warning {
-  color: #d69e2e;
+  color: #B45309;
   font-weight: 500;
   font-size: 13px;
 }
 
 .status-critical {
-  color: #e53e3e;
+  color: #C62828;
   font-weight: 500;
   font-size: 13px;
 }
@@ -157,19 +182,22 @@
   gap: 8px;
   cursor: pointer;
   font-size: 14px;
-  color: #4a5568;
-  padding: 4px 0;
+  color: var(--clinical-text-secondary);
+  padding: 6px 8px;
+  border-radius: var(--clinical-radius);
+  transition: background-color 150ms ease;
 }
 
 .checkbox-label:hover {
-  color: #2d3748;
+  color: var(--clinical-text);
+  background-color: var(--clinical-bg-sunken);
 }
 
 .checkbox-label input[type="checkbox"] {
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #3182ce;
+  accent-color: var(--clinical-primary);
 }
 
 /* ============================================================================
@@ -188,8 +216,8 @@
 }
 
 .bp-inputs span {
-  color: #718096;
-  font-weight: bold;
+  color: var(--clinical-text-muted);
+  font-weight: 600;
 }
 
 /* ============================================================================
@@ -204,15 +232,23 @@
 .radio-group label {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
   font-size: 14px;
+  color: var(--clinical-text-secondary);
+  padding: 6px 10px;
+  border-radius: var(--clinical-radius);
+  transition: background-color 150ms ease;
+}
+
+.radio-group label:hover {
+  background-color: var(--clinical-bg-sunken);
 }
 
 .radio-group input[type="radio"] {
   width: 16px;
   height: 16px;
-  accent-color: #3182ce;
+  accent-color: var(--clinical-primary);
 }
 
 /* ============================================================================
@@ -220,12 +256,13 @@
    ============================================================================ */
 
 .diagnosis-result {
-  border: 2px solid #3182ce;
+  border: 2px solid var(--clinical-primary);
+  background: var(--clinical-primary-light);
 }
 
 .diagnosis-result h3 {
-  color: #2b6cb0;
-  border-color: #2b6cb0;
+  color: var(--clinical-primary);
+  border-color: var(--clinical-primary);
 }
 
 /* ============================================================================
@@ -259,6 +296,10 @@
   .bp-inputs {
     justify-content: flex-start;
   }
+  
+  .clinical-section {
+    padding: 16px;
+  }
 }
 
 @media (max-width: 1024px) {
@@ -268,52 +309,47 @@
 }
 
 /* ============================================================================
-   Section-Specific Styling
+   Section-Specific Styling - Using new color system
    ============================================================================ */
 
 .vital-signs {
-  border-left: 4px solid #e53e3e;
+  border-left: 3px solid #C62828;
 }
 
 .vital-signs h3 {
-  color: #c53030;
-  border-color: #e53e3e;
+  color: #C62828;
 }
 
 .blood-chemistry {
-  border-left: 4px solid #805ad5;
+  border-left: 3px solid #7B1FA2;
 }
 
 .blood-chemistry h3 {
-  color: #6b46c1;
-  border-color: #805ad5;
+  color: #7B1FA2;
 }
 
 .cardiac {
-  border-left: 4px solid #ed8936;
+  border-left: 3px solid #B45309;
 }
 
 .cardiac h3 {
-  color: #c05621;
-  border-color: #ed8936;
+  color: #B45309;
 }
 
 .medical-history {
-  border-left: 4px solid #38a169;
+  border-left: 3px solid #137F2E;
 }
 
 .medical-history h3 {
-  color: #276749;
-  border-color: #38a169;
+  color: #137F2E;
 }
 
 .medications {
-  border-left: 4px solid #4299e1;
+  border-left: 3px solid var(--clinical-primary);
 }
 
 .medications h3 {
-  color: #2b6cb0;
-  border-color: #4299e1;
+  color: var(--clinical-primary);
 }
 
 /* ============================================================================

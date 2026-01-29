@@ -1,3 +1,244 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ============================================================================
+   MedSafe Design System - Base Styles
+   ============================================================================ */
+
+@layer base {
+  :root {
+    /* Primary teal */
+    --color-primary: #0F6E66;
+    --color-primary-hover: #0D5F58;
+    --color-primary-active: #0A4E48;
+    --color-primary-subtle: #EFFAF9;
+    
+    /* Neutrals */
+    --color-background: #F7FAFB;
+    --color-surface: #FFFFFF;
+    --color-border: #E2E8EA;
+    --color-border-subtle: #F0F4F5;
+    --color-text-primary: #0F172A;
+    --color-text-secondary: #4A5B61;
+    --color-text-tertiary: #6B7D84;
+    --color-text-muted: #9AA8AD;
+    
+    /* Semantic */
+    --color-success: #137F2E;
+    --color-success-bg: #EDFCF0;
+    --color-warning: #B45309;
+    --color-warning-bg: #FEF9EC;
+    --color-error: #C62828;
+    --color-error-bg: #FEF2F2;
+    
+    /* Condition colors */
+    --color-healthy: #137F2E;
+    --color-diabetes: #B45309;
+    --color-hypertension: #C62828;
+    --color-heart-disease: #7B1FA2;
+    
+    /* Spacing and sizing */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-base: 200ms ease;
+  }
+
+  html {
+    font-family: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-neutral-50 text-neutral-900;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  /* Focus visible styles */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2;
+  }
+}
+
+@layer components {
+  /* Primary Button */
+  .btn-primary {
+    @apply inline-flex items-center justify-center px-4 py-2.5 
+           bg-primary-500 text-white font-medium text-sm
+           rounded-md shadow-subtle
+           transition-all duration-150
+           hover:bg-primary-600 
+           active:bg-primary-700
+           focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Secondary Button */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-4 py-2.5
+           bg-white text-neutral-700 font-medium text-sm
+           border border-neutral-200 rounded-md shadow-subtle
+           transition-all duration-150
+           hover:bg-neutral-50 hover:border-neutral-300
+           active:bg-neutral-100
+           focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Ghost Button */
+  .btn-ghost {
+    @apply inline-flex items-center justify-center px-4 py-2.5
+           bg-transparent text-neutral-600 font-medium text-sm
+           rounded-md
+           transition-all duration-150
+           hover:bg-neutral-100 hover:text-neutral-900
+           active:bg-neutral-200
+           focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Form Input */
+  .form-input {
+    @apply w-full px-3 py-2.5 
+           bg-white text-neutral-900
+           border border-neutral-200 rounded-md
+           text-sm placeholder:text-neutral-400
+           transition-all duration-150
+           hover:border-neutral-300
+           focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none
+           disabled:bg-neutral-50 disabled:text-neutral-400 disabled:cursor-not-allowed;
+  }
+
+  /* Form Select */
+  .form-select {
+    @apply w-full px-3 py-2.5 
+           bg-white text-neutral-900
+           border border-neutral-200 rounded-md
+           text-sm
+           transition-all duration-150
+           hover:border-neutral-300
+           focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none
+           disabled:bg-neutral-50 disabled:text-neutral-400 disabled:cursor-not-allowed;
+  }
+
+  /* Card */
+  .card {
+    @apply bg-white border border-neutral-200 rounded-lg shadow-card;
+  }
+
+  /* Card with hover */
+  .card-interactive {
+    @apply bg-white border border-neutral-200 rounded-lg shadow-card
+           transition-all duration-150
+           hover:shadow-dropdown hover:border-neutral-300;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 
+           text-xs font-medium rounded-full;
+  }
+
+  .badge-success {
+    @apply badge bg-success-50 text-success-600;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning-50 text-warning-600;
+  }
+
+  .badge-error {
+    @apply badge bg-error-50 text-error-600;
+  }
+
+  .badge-neutral {
+    @apply badge bg-neutral-100 text-neutral-600;
+  }
+
+  /* Tab navigation */
+  .tab-nav {
+    @apply flex border-b border-neutral-200;
+  }
+
+  .tab-item {
+    @apply flex items-center px-4 py-3 
+           text-sm font-medium text-neutral-500
+           border-b-2 border-transparent
+           transition-all duration-150
+           hover:text-neutral-700 hover:border-neutral-300;
+  }
+
+  .tab-item-active {
+    @apply text-primary-500 border-primary-500;
+  }
+
+  /* Status indicators */
+  .status-dot {
+    @apply w-2 h-2 rounded-full;
+  }
+
+  .status-dot-success {
+    @apply status-dot bg-success-500;
+  }
+
+  .status-dot-warning {
+    @apply status-dot bg-warning-500;
+  }
+
+  .status-dot-error {
+    @apply status-dot bg-error-500;
+  }
+
+  /* Alert boxes */
+  .alert {
+    @apply flex items-start p-4 rounded-lg text-sm;
+  }
+
+  .alert-success {
+    @apply alert bg-success-50 text-success-700 border border-success-100;
+  }
+
+  .alert-warning {
+    @apply alert bg-warning-50 text-warning-700 border border-warning-100;
+  }
+
+  .alert-error {
+    @apply alert bg-error-50 text-error-700 border border-error-100;
+  }
+
+  .alert-info {
+    @apply alert bg-primary-50 text-primary-700 border border-primary-100;
+  }
+
+  /* Section header */
+  .section-header {
+    @apply text-sm font-semibold text-neutral-700 uppercase tracking-wide;
+  }
+
+  /* Divider */
+  .divider {
+    @apply border-t border-neutral-200;
+  }
+}
+
+@layer utilities {
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
