@@ -7,6 +7,10 @@ import pickle
 import tempfile
 import uuid
 from typing import Optional, List
+import base64
+import json
+import socket
+from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -28,13 +32,17 @@ from lab_model import (
     predict_prob,
 )
 
-# Load .env from this folder
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+# Load env from both repo root and server folder.
+# - Frontend uses VITE_* vars, backend prefers non-VITE vars.
+_SERVER_DIR = os.path.dirname(__file__)
+load_dotenv(dotenv_path=os.path.join(_SERVER_DIR, ".env"))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(_SERVER_DIR), ".env"))
 
 # Environment
 FL_SERVER_ADDRESS = os.environ.get("FL_SERVER_ADDRESS", "127.0.0.1:8080")
 SUPABASE_URL = os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("VITE_SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
 app = Flask(__name__)
 CORS(app)
@@ -46,8 +54,70 @@ _current_run_id: Optional[str] = None
 
 
 def sb():
-    assert SUPABASE_URL and SUPABASE_KEY, "Supabase env is missing"
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    """
+    Create a Supabase client for backend use.
+    Prefers service role key if present (required for inserts when RLS is enabled).
+    Validates URL so we fail fast with a helpful message instead of a DNS error.
+    """
+    url = SUPABASE_URL
+    key = SUPABASE_SERVICE_KEY or SUPABASE_KEY
+    if not url or not key:
+        raise RuntimeError(
+            "Supabase env is missing. Set SUPABASE_URL and SUPABASE_SERVICE_KEY (recommended) "
+            "or SUPABASE_ANON_KEY. You can also set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY."
+        )
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise RuntimeError(
+            f"Invalid SUPABASE_URL '{url}'. Expected like 'https://<project-ref>.supabase.co'."
+        )
+
+    hostname = parsed.hostname or ""
+
+    # Common mistake: pasting a Postgres hostname or pooler hostname instead of the Supabase API URL.
+    if "supabase.co" not in parsed.netloc:
+        raise RuntimeError(
+            f"SUPABASE_URL host '{parsed.netloc}' doesn't look like a Supabase API URL. "
+            "Use the Project URL from Supabase dashboard (Settings → API)."
+        )
+
+    # Detect a common, painful misconfig: key belongs to a different project than SUPABASE_URL.
+    # This catches typos like https://<ref-typo>.supabase.co which become DNS NXDOMAIN.
+    try:
+        parts = key.split(".")
+        if len(parts) >= 2:
+            payload = parts[1]
+            payload += "=" * ((4 - (len(payload) % 4)) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+            ref = claims.get("ref")
+            if (
+                isinstance(ref, str)
+                and ref
+                and hostname.endswith(".supabase.co")
+                and not hostname.startswith(ref + ".")
+            ):
+                raise RuntimeError(
+                    f"SUPABASE_URL host '{hostname}' does not match project ref '{ref}' encoded in the Supabase key. "
+                    f"Expected SUPABASE_URL like 'https://{ref}.supabase.co'."
+                )
+    except RuntimeError:
+        raise
+    except Exception:
+        # If parsing fails (non-JWT key), just skip this check.
+        pass
+
+    # DNS preflight for clearer errors than httpx ConnectError.
+    try:
+        socket.getaddrinfo(hostname, 443)
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot resolve SUPABASE_URL host '{hostname}'. "
+            "Double-check the Project URL in Supabase dashboard (Settings → API → Project URL). "
+            f"DNS error: {e}"
+        ) from e
+
+    return create_client(url, key)
 
 
 def generate_clinical_insights(body: dict, disease_type: str, risk_score: float) -> dict:
@@ -414,11 +484,13 @@ def add_patient_data():
             if len(unique_classes) < 2:
                 # If only one class, add synthetic diversity
                 print(f"Warning: Only {len(unique_classes)} class(es) found. Adding synthetic diversity.")
-                for i in range(len(unique_classes), 4):
+                # IMPORTANT: Add labels that are NOT already present. (Previous logic could re-add the same class.)
+                missing_labels = [lbl for lbl in range(4) if lbl not in set(unique_classes.tolist())]
+                for lbl in missing_labels:
                     synthetic_X = X_train.copy()
                     noise = np.random.normal(0, 0.1, synthetic_X.shape)
                     synthetic_X = synthetic_X + noise
-                    synthetic_y = np.full(len(synthetic_X), i)
+                    synthetic_y = np.full(len(synthetic_X), lbl)
                     X_train = np.vstack([X_train, synthetic_X])
                     y_train = np.concatenate([y_train, synthetic_y])
             
@@ -577,9 +649,13 @@ def send_model_update():
         if len(unique_classes) < 2:
             # If only one class, create a dummy second class for training
             print(f"Warning: Only {len(unique_classes)} class(es) found. Adding dummy data for training.")
-            # Add some dummy data with different labels
+            # Add some dummy data with a DIFFERENT label than the existing one
+            existing = int(unique_classes[0])
+            alt = 0 if existing != 0 else 1
             dummy_X = X_train.copy()
-            dummy_y = np.full(len(dummy_X), 1)  # Create class 1
+            noise = np.random.normal(0, 0.05, dummy_X.shape)
+            dummy_X = dummy_X + noise
+            dummy_y = np.full(len(dummy_X), alt)
             X_train = np.vstack([X_train, dummy_X])
             y_train = np.concatenate([y_train, dummy_y])
         
@@ -655,6 +731,9 @@ def send_model_update():
         })
         
     except Exception as e:
+        print(f"Error in send_model_update: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

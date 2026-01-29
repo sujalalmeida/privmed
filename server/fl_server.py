@@ -2,9 +2,14 @@ import os
 import numpy as np
 import flwr as fl
 from supabase import create_client, Client
+import base64
+import json
+import socket
+from urllib.parse import urlparse
 
 SUPABASE_URL = os.environ.get("VITE_SUPABASE_URL") or os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("VITE_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
 _run_id = os.environ.get("FL_RUN_ID", "")
 _num_rounds = int(os.environ.get("FL_NUM_ROUNDS", "3"))
@@ -12,8 +17,50 @@ _model_type = os.environ.get("FL_MODEL_TYPE", "logreg")
 
 
 def _sb() -> Client:
-    assert SUPABASE_URL and SUPABASE_KEY, "Supabase env vars missing"
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    url = SUPABASE_URL
+    key = SUPABASE_SERVICE_KEY or SUPABASE_KEY
+    if not url or not key:
+        raise RuntimeError(
+            "Supabase env vars missing. Set SUPABASE_URL and SUPABASE_SERVICE_KEY (recommended) "
+            "or SUPABASE_ANON_KEY."
+        )
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise RuntimeError(
+            f"Invalid SUPABASE_URL '{url}'. Expected like 'https://<project-ref>.supabase.co'."
+        )
+    hostname = parsed.hostname or ""
+
+    # Key-ref vs URL mismatch check (helps catch typos in project ref).
+    try:
+        parts = key.split(".")
+        if len(parts) >= 2:
+            payload = parts[1]
+            payload += "=" * ((4 - (len(payload) % 4)) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8"))
+            ref = claims.get("ref")
+            if (
+                isinstance(ref, str)
+                and ref
+                and hostname.endswith(".supabase.co")
+                and not hostname.startswith(ref + ".")
+            ):
+                raise RuntimeError(
+                    f"SUPABASE_URL host '{hostname}' does not match project ref '{ref}' encoded in the Supabase key. "
+                    f"Expected SUPABASE_URL like 'https://{ref}.supabase.co'."
+                )
+    except RuntimeError:
+        raise
+    except Exception:
+        pass
+
+    try:
+        socket.getaddrinfo(hostname, 443)
+    except OSError as e:
+        raise RuntimeError(
+            f"Cannot resolve SUPABASE_URL host '{hostname}'. DNS error: {e}"
+        ) from e
+    return create_client(url, key)
 
 
 def _insert_round_metric(round_idx: int, global_acc, grad_norm):
