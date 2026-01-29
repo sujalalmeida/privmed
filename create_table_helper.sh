@@ -1,16 +1,16 @@
 #!/bin/bash
 
-echo "🗄️  Creating fl_model_downloads Table"
+echo "🗄️  Creating MedSafe Supabase Tables"
 echo "======================================"
 echo ""
 
 # Check if SQL file exists
-if [ ! -f "/Users/sujalalmeida/Downloads/medsafe/server/create_fl_model_downloads_table.sql" ]; then
+if [ ! -f "/Users/sujalalmeida/Downloads/medsafe/server/create_required_tables.sql" ]; then
     echo "❌ SQL file not found!"
     exit 1
 fi
 
-echo "📋 This script will show you the SQL to create the table."
+echo "📋 This script will show you the SQL to create the required tables."
 echo ""
 echo "⚠️  IMPORTANT: You need to run this SQL in your Supabase Dashboard"
 echo ""
@@ -27,7 +27,7 @@ echo "📝 SQL TO COPY:"
 echo "======================================"
 echo ""
 
-cat /Users/sujalalmeida/Downloads/medsafe/server/create_fl_model_downloads_table.sql
+cat /Users/sujalalmeida/Downloads/medsafe/server/create_required_tables.sql
 
 echo ""
 echo "======================================"
@@ -37,6 +37,5 @@ echo "   1. Restart your backend: cd server && python app.py"
 echo "   2. Refresh your browser"
 echo "   3. The error will be gone!"
 echo ""
-echo "🎯 Then test by downloading a global model from the Lab Dashboard"
-echo "   You'll see beautiful improvement metrics! 📊"
+echo "🎯 Then test by submitting patient data from the Lab Dashboard."
 echo ""

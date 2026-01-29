@@ -1560,5 +1560,786 @@ def status():
     return jsonify({"running": running, "run_id": _current_run_id})
 
 
+# ============================================================================
+# FEATURE 1: Push Global Model to Labs
+# ============================================================================
+
+@app.post("/admin/push_global_model")
+def push_global_model():
+    """
+    Initiates broadcast of global model to all participating labs.
+    Creates broadcast record and notifies all labs.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        initiated_by = body.get('initiated_by', 'admin')
+        
+        # Get current global model version
+        global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(1).execute()
+        
+        if not global_model_result.data:
+            return jsonify({'error': 'No global model available to push'}), 400
+        
+        global_model = global_model_result.data[0]
+        global_version = global_model['version']
+        
+        # Get all participating labs
+        labs_result = sb().table('fl_client_updates').select('client_label').execute()
+        if not labs_result.data:
+            return jsonify({'error': 'No labs found to push to'}), 400
+        
+        # Get unique lab labels
+        lab_labels = list(set([r['client_label'] for r in labs_result.data if r['client_label']]))
+        
+        if not lab_labels:
+            return jsonify({'error': 'No labs found to push to'}), 400
+        
+        # Create broadcast record
+        broadcast = sb().table('fl_model_broadcasts').insert({
+            'global_model_version': global_version,
+            'initiated_by': initiated_by,
+            'status': 'in_progress',
+            'labs_notified': 0,
+            'labs_downloaded': 0
+        }).execute()
+        
+        broadcast_id = broadcast.data[0]['id']
+        
+        # Get lab preferences for auto-sync
+        preferences_result = sb().table('fl_lab_preferences').select('*').execute()
+        preferences = {p['lab_label']: p['auto_sync_enabled'] for p in (preferences_result.data or [])}
+        
+        # Create sync status records for each lab
+        sync_records = []
+        for lab_label in lab_labels:
+            auto_sync = preferences.get(lab_label, False)
+            sync_records.append({
+                'broadcast_id': broadcast_id,
+                'lab_label': lab_label,
+                'notified_at': 'now()',
+                'auto_sync_enabled': auto_sync,
+                'status': 'notified'
+            })
+        
+        # Insert all sync status records
+        sb().table('fl_lab_sync_status').insert(sync_records).execute()
+        
+        # Update broadcast with notified count
+        sb().table('fl_model_broadcasts').update({
+            'labs_notified': len(lab_labels),
+            'status': 'in_progress'
+        }).eq('id', broadcast_id).execute()
+        
+        return jsonify({
+            'success': True,
+            'broadcast_id': broadcast_id,
+            'global_model_version': global_version,
+            'labs_notified': len(lab_labels),
+            'lab_labels': lab_labels
+        })
+        
+    except Exception as e:
+        print(f"Error in push_global_model: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/broadcast_status/<broadcast_id>")
+def get_broadcast_status(broadcast_id):
+    """
+    Returns real-time download status per lab for a specific broadcast.
+    """
+    try:
+        # Get broadcast details
+        broadcast = sb().table('fl_model_broadcasts').select('*').eq('id', broadcast_id).execute()
+        
+        if not broadcast.data:
+            return jsonify({'error': 'Broadcast not found'}), 404
+        
+        broadcast_data = broadcast.data[0]
+        
+        # Get sync status for all labs
+        sync_status = sb().table('fl_lab_sync_status').select('*').eq('broadcast_id', broadcast_id).execute()
+        
+        labs_status = []
+        labs_downloaded = 0
+        labs_notified = 0
+        
+        for status in (sync_status.data or []):
+            lab_info = {
+                'lab_label': status['lab_label'],
+                'status': status['status'],
+                'notified_at': status['notified_at'],
+                'downloaded_at': status['downloaded_at'],
+                'auto_sync_enabled': status['auto_sync_enabled']
+            }
+            labs_status.append(lab_info)
+            
+            if status['status'] == 'downloaded':
+                labs_downloaded += 1
+                labs_notified += 1
+            elif status['status'] == 'notified':
+                labs_notified += 1
+        
+        # Update broadcast counts if changed
+        if labs_downloaded != broadcast_data['labs_downloaded'] or labs_notified != broadcast_data['labs_notified']:
+            new_status = 'completed' if labs_downloaded == len(labs_status) else 'in_progress'
+            sb().table('fl_model_broadcasts').update({
+                'labs_notified': labs_notified,
+                'labs_downloaded': labs_downloaded,
+                'status': new_status
+            }).eq('id', broadcast_id).execute()
+            broadcast_data['status'] = new_status
+        
+        return jsonify({
+            'broadcast_id': broadcast_id,
+            'global_model_version': broadcast_data['global_model_version'],
+            'initiated_by': broadcast_data['initiated_by'],
+            'created_at': broadcast_data['created_at'],
+            'status': broadcast_data['status'],
+            'labs_notified': labs_notified,
+            'labs_downloaded': labs_downloaded,
+            'total_labs': len(labs_status),
+            'labs': labs_status,
+            'progress_percentage': (labs_downloaded / len(labs_status) * 100) if labs_status else 0
+        })
+        
+    except Exception as e:
+        print(f"Error in get_broadcast_status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/broadcast_history")
+def get_broadcast_history():
+    """
+    Returns history of all model broadcasts.
+    """
+    try:
+        broadcasts = sb().table('fl_model_broadcasts').select('*').order('created_at', desc=True).limit(20).execute()
+        
+        result = []
+        for b in (broadcasts.data or []):
+            result.append({
+                'id': b['id'],
+                'created_at': b['created_at'],
+                'global_model_version': b['global_model_version'],
+                'initiated_by': b['initiated_by'],
+                'status': b['status'],
+                'labs_notified': b['labs_notified'],
+                'labs_downloaded': b['labs_downloaded']
+            })
+        
+        return jsonify({'broadcasts': result})
+        
+    except Exception as e:
+        print(f"Error in get_broadcast_history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/lab/enable_auto_sync")
+def enable_auto_sync():
+    """
+    Lab enables/disables auto-sync for automatic global model downloads.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        lab_label = body.get('lab_label')
+        enabled = body.get('enabled', False)
+        
+        if not lab_label:
+            return jsonify({'error': 'lab_label required'}), 400
+        
+        # Upsert lab preference
+        existing = sb().table('fl_lab_preferences').select('*').eq('lab_label', lab_label).execute()
+        
+        if existing.data:
+            sb().table('fl_lab_preferences').update({
+                'auto_sync_enabled': enabled,
+                'updated_at': 'now()'
+            }).eq('lab_label', lab_label).execute()
+        else:
+            sb().table('fl_lab_preferences').insert({
+                'lab_label': lab_label,
+                'auto_sync_enabled': enabled
+            }).execute()
+        
+        return jsonify({
+            'success': True,
+            'lab_label': lab_label,
+            'auto_sync_enabled': enabled
+        })
+        
+    except Exception as e:
+        print(f"Error in enable_auto_sync: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/lab/get_auto_sync_status")
+def get_auto_sync_status():
+    """
+    Get auto-sync status for a lab.
+    """
+    try:
+        lab_label = request.args.get('lab_label')
+        
+        if not lab_label:
+            return jsonify({'error': 'lab_label required'}), 400
+        
+        pref = sb().table('fl_lab_preferences').select('*').eq('lab_label', lab_label).execute()
+        
+        auto_sync_enabled = False
+        if pref.data:
+            auto_sync_enabled = pref.data[0].get('auto_sync_enabled', False)
+        
+        return jsonify({
+            'lab_label': lab_label,
+            'auto_sync_enabled': auto_sync_enabled
+        })
+        
+    except Exception as e:
+        print(f"Error in get_auto_sync_status: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/lab/check_for_updates")
+def check_for_updates():
+    """
+    Lab polls for new global model updates.
+    Returns info about pending broadcasts that haven't been downloaded.
+    """
+    try:
+        lab_label = request.args.get('lab_label')
+        
+        if not lab_label:
+            return jsonify({'error': 'lab_label required'}), 400
+        
+        # Check for pending sync status entries (notified but not downloaded)
+        pending = sb().table('fl_lab_sync_status').select('*, fl_model_broadcasts(*)').eq('lab_label', lab_label).eq('status', 'notified').order('notified_at', desc=True).limit(1).execute()
+        
+        if pending.data and len(pending.data) > 0:
+            record = pending.data[0]
+            broadcast = record.get('fl_model_broadcasts', {})
+            
+            return jsonify({
+                'new_model_available': True,
+                'version': broadcast.get('global_model_version'),
+                'broadcast_id': record['broadcast_id'],
+                'notified_at': record['notified_at'],
+                'auto_sync_enabled': record['auto_sync_enabled']
+            })
+        
+        return jsonify({
+            'new_model_available': False,
+            'version': None,
+            'broadcast_id': None
+        })
+        
+    except Exception as e:
+        print(f"Error in check_for_updates: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/lab/acknowledge_download")
+def acknowledge_download():
+    """
+    Lab confirms successful download of global model from a broadcast.
+    Updates fl_lab_sync_status record.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        lab_label = body.get('lab_label')
+        broadcast_id = body.get('broadcast_id')
+        
+        if not lab_label or not broadcast_id:
+            return jsonify({'error': 'lab_label and broadcast_id required'}), 400
+        
+        # Update sync status to downloaded
+        sb().table('fl_lab_sync_status').update({
+            'status': 'downloaded',
+            'downloaded_at': 'now()'
+        }).eq('broadcast_id', broadcast_id).eq('lab_label', lab_label).execute()
+        
+        # Update broadcast counts
+        sync_status = sb().table('fl_lab_sync_status').select('*').eq('broadcast_id', broadcast_id).execute()
+        labs_downloaded = len([s for s in (sync_status.data or []) if s['status'] == 'downloaded'])
+        total_labs = len(sync_status.data or [])
+        
+        new_status = 'completed' if labs_downloaded == total_labs else 'in_progress'
+        sb().table('fl_model_broadcasts').update({
+            'labs_downloaded': labs_downloaded,
+            'status': new_status
+        }).eq('id', broadcast_id).execute()
+        
+        return jsonify({
+            'success': True,
+            'lab_label': lab_label,
+            'broadcast_id': broadcast_id,
+            'status': 'downloaded'
+        })
+        
+    except Exception as e:
+        print(f"Error in acknowledge_download: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# FEATURE 2: A/B Test Dashboard
+# ============================================================================
+
+@app.post("/admin/run_ab_test")
+def run_ab_test():
+    """
+    Run an A/B test comparing two models.
+    Model A: Local lab model
+    Model B: Global federated model
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        test_name = body.get('test_name', 'A/B Test')
+        model_a = body.get('model_a', {})  # {type: 'local', lab_label: 'Lab A'}
+        model_b = body.get('model_b', {})  # {type: 'global', version: 5}
+        use_held_out = body.get('use_held_out', False)
+        
+        # Create test record
+        test_record = sb().table('fl_ab_tests').insert({
+            'test_name': test_name,
+            'model_a_type': model_a.get('type', 'local'),
+            'model_a_version': model_a.get('lab_label') or str(model_a.get('version', '')),
+            'model_b_type': model_b.get('type', 'global'),
+            'model_b_version': model_b.get('lab_label') or str(model_b.get('version', '')),
+            'status': 'running'
+        }).execute()
+        
+        test_id = test_record.data[0]['id']
+        
+        # Load test data
+        if use_held_out:
+            # Use held-out test dataset
+            test_data = sb().table('fl_test_patient_records').select('*').eq('is_active', True).execute()
+            if not test_data.data:
+                # Fall back to sampling from patient_records
+                test_data = sb().table('patient_records').select('*').limit(50).execute()
+        else:
+            # Sample from patient_records
+            test_data = sb().table('patient_records').select('*').limit(50).execute()
+        
+        if not test_data.data or len(test_data.data) == 0:
+            sb().table('fl_ab_tests').update({'status': 'failed'}).eq('id', test_id).execute()
+            return jsonify({'error': 'No test data available'}), 400
+        
+        test_records = test_data.data
+        num_samples = len(test_records)
+        
+        # Load Model A (local)
+        model_a_obj = None
+        if model_a.get('type') == 'local' and model_a.get('lab_label'):
+            model_a_path = model_path_for_lab(model_a['lab_label'])
+            if os.path.exists(model_a_path):
+                with open(model_a_path, 'rb') as f:
+                    model_a_obj = pickle.load(f)
+        
+        # Load Model B (global)
+        model_b_obj = None
+        global_path = os.path.join(os.path.dirname(__file__), 'models', 'global.pkl')
+        if os.path.exists(global_path):
+            with open(global_path, 'rb') as f:
+                model_b_obj = pickle.load(f)
+        
+        if model_a_obj is None and model_b_obj is None:
+            sb().table('fl_ab_tests').update({'status': 'failed'}).eq('id', test_id).execute()
+            return jsonify({'error': 'Neither model could be loaded'}), 400
+        
+        # Run predictions
+        disease_labels = ['healthy', 'diabetes', 'hypertension', 'heart_disease']
+        model_a_predictions = []
+        model_b_predictions = []
+        model_a_correct = 0
+        model_b_correct = 0
+        
+        # Confusion matrix initialization (4x4 for 4 classes)
+        confusion_a = [[0]*4 for _ in range(4)]
+        confusion_b = [[0]*4 for _ in range(4)]
+        
+        for i, record in enumerate(test_records):
+            # Encode features
+            X = _encode_row_from_db(record)
+            actual_label = record.get('disease_label', 0)
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            
+            # Model A prediction
+            if model_a_obj:
+                try:
+                    pred_a = int(model_a_obj.predict(X_scaled)[0])
+                    proba_a = model_a_obj.predict_proba(X_scaled)[0]
+                    conf_a = float(max(proba_a))
+                except:
+                    pred_a = _predict_label_from_features(record)
+                    conf_a = 0.5
+            else:
+                pred_a = _predict_label_from_features(record)
+                conf_a = 0.5
+            
+            # Model B prediction
+            if model_b_obj:
+                try:
+                    pred_b = int(model_b_obj.predict(X_scaled)[0])
+                    proba_b = model_b_obj.predict_proba(X_scaled)[0]
+                    conf_b = float(max(proba_b))
+                except:
+                    pred_b = _predict_label_from_features(record)
+                    conf_b = 0.5
+            else:
+                pred_b = _predict_label_from_features(record)
+                conf_b = 0.5
+            
+            # Track correctness
+            a_correct = pred_a == actual_label
+            b_correct = pred_b == actual_label
+            if a_correct:
+                model_a_correct += 1
+            if b_correct:
+                model_b_correct += 1
+            
+            # Update confusion matrices
+            if 0 <= actual_label < 4 and 0 <= pred_a < 4:
+                confusion_a[actual_label][pred_a] += 1
+            if 0 <= actual_label < 4 and 0 <= pred_b < 4:
+                confusion_b[actual_label][pred_b] += 1
+            
+            # Store predictions
+            model_a_predictions.append({
+                'patient_id': i + 1,
+                'actual': disease_labels[actual_label] if 0 <= actual_label < 4 else 'unknown',
+                'actual_label': actual_label,
+                'predicted': disease_labels[pred_a] if 0 <= pred_a < 4 else 'unknown',
+                'predicted_label': pred_a,
+                'confidence': conf_a,
+                'correct': a_correct
+            })
+            
+            model_b_predictions.append({
+                'patient_id': i + 1,
+                'actual': disease_labels[actual_label] if 0 <= actual_label < 4 else 'unknown',
+                'actual_label': actual_label,
+                'predicted': disease_labels[pred_b] if 0 <= pred_b < 4 else 'unknown',
+                'predicted_label': pred_b,
+                'confidence': conf_b,
+                'correct': b_correct
+            })
+        
+        # Calculate accuracies
+        model_a_accuracy = model_a_correct / num_samples if num_samples > 0 else 0
+        model_b_accuracy = model_b_correct / num_samples if num_samples > 0 else 0
+        accuracy_delta = model_b_accuracy - model_a_accuracy
+        
+        # Calculate per-class metrics
+        def calc_per_class_metrics(confusion):
+            metrics = {}
+            for i, label in enumerate(disease_labels):
+                tp = confusion[i][i]
+                fp = sum(confusion[j][i] for j in range(4) if j != i)
+                fn = sum(confusion[i][j] for j in range(4) if j != i)
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+                f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+                metrics[label] = {'precision': precision, 'recall': recall, 'f1': f1}
+            return metrics
+        
+        per_class_a = calc_per_class_metrics(confusion_a)
+        per_class_b = calc_per_class_metrics(confusion_b)
+        
+        # Simple statistical significance (using McNemar's test approximation)
+        # Count disagreements where one model is right and the other is wrong
+        n01 = sum(1 for a, b in zip(model_a_predictions, model_b_predictions) if not a['correct'] and b['correct'])
+        n10 = sum(1 for a, b in zip(model_a_predictions, model_b_predictions) if a['correct'] and not b['correct'])
+        
+        # Chi-squared approximation
+        if n01 + n10 > 0:
+            chi_sq = (abs(n01 - n10) - 1) ** 2 / (n01 + n10)
+            # p-value approximation (chi-squared with 1 df)
+            p_value = 1 - min(0.99, chi_sq / 10)  # Simplified approximation
+            is_significant = p_value < 0.05
+        else:
+            p_value = 1.0
+            is_significant = False
+        
+        statistical_significance = {
+            'p_value': p_value,
+            'is_significant': is_significant,
+            'test_used': 'McNemar',
+            'model_b_wins': n01,
+            'model_a_wins': n10
+        }
+        
+        # Update test record with results
+        sb().table('fl_ab_tests').update({
+            'num_samples': num_samples,
+            'model_a_accuracy': model_a_accuracy,
+            'model_b_accuracy': model_b_accuracy,
+            'accuracy_delta': accuracy_delta,
+            'model_a_predictions': model_a_predictions,
+            'model_b_predictions': model_b_predictions,
+            'confusion_matrix_a': confusion_a,
+            'confusion_matrix_b': confusion_b,
+            'per_class_metrics_a': per_class_a,
+            'per_class_metrics_b': per_class_b,
+            'statistical_significance': statistical_significance,
+            'status': 'completed'
+        }).eq('id', test_id).execute()
+        
+        return jsonify({
+            'success': True,
+            'test_id': test_id,
+            'test_name': test_name,
+            'num_samples': num_samples,
+            'model_a_accuracy': model_a_accuracy,
+            'model_b_accuracy': model_b_accuracy,
+            'accuracy_delta': accuracy_delta,
+            'winner': 'Model B (Global)' if model_b_accuracy > model_a_accuracy else ('Model A (Local)' if model_a_accuracy > model_b_accuracy else 'Tie'),
+            'statistical_significance': statistical_significance,
+            'fl_improvement': f"+{accuracy_delta*100:.2f}%" if accuracy_delta > 0 else f"{accuracy_delta*100:.2f}%"
+        })
+        
+    except Exception as e:
+        print(f"Error in run_ab_test: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/ab_test_results/<test_id>")
+def get_ab_test_results(test_id):
+    """
+    Get detailed results for a specific A/B test.
+    """
+    try:
+        test = sb().table('fl_ab_tests').select('*').eq('id', test_id).execute()
+        
+        if not test.data:
+            return jsonify({'error': 'Test not found'}), 404
+        
+        result = test.data[0]
+        
+        return jsonify({
+            'test_id': result['id'],
+            'test_name': result['test_name'],
+            'created_at': result['created_at'],
+            'status': result['status'],
+            'model_a': {
+                'type': result['model_a_type'],
+                'version': result['model_a_version'],
+                'accuracy': result['model_a_accuracy'],
+                'predictions': result['model_a_predictions'],
+                'confusion_matrix': result['confusion_matrix_a'],
+                'per_class_metrics': result.get('per_class_metrics_a')
+            },
+            'model_b': {
+                'type': result['model_b_type'],
+                'version': result['model_b_version'],
+                'accuracy': result['model_b_accuracy'],
+                'predictions': result['model_b_predictions'],
+                'confusion_matrix': result['confusion_matrix_b'],
+                'per_class_metrics': result.get('per_class_metrics_b')
+            },
+            'num_samples': result['num_samples'],
+            'accuracy_delta': result['accuracy_delta'],
+            'winner': 'Model B' if (result['model_b_accuracy'] or 0) > (result['model_a_accuracy'] or 0) else ('Model A' if (result['model_a_accuracy'] or 0) > (result['model_b_accuracy'] or 0) else 'Tie'),
+            'statistical_significance': result.get('statistical_significance')
+        })
+        
+    except Exception as e:
+        print(f"Error in get_ab_test_results: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/ab_test_history")
+def get_ab_test_history():
+    """
+    Get list of all past A/B tests.
+    """
+    try:
+        tests = sb().table('fl_ab_tests').select('*').order('created_at', desc=True).limit(20).execute()
+        
+        result = []
+        for t in (tests.data or []):
+            winner = 'Tie'
+            if (t['model_b_accuracy'] or 0) > (t['model_a_accuracy'] or 0):
+                winner = 'Model B (Global)'
+            elif (t['model_a_accuracy'] or 0) > (t['model_b_accuracy'] or 0):
+                winner = 'Model A (Local)'
+            
+            result.append({
+                'id': t['id'],
+                'created_at': t['created_at'],
+                'test_name': t['test_name'],
+                'model_a_type': t['model_a_type'],
+                'model_a_version': t['model_a_version'],
+                'model_b_type': t['model_b_type'],
+                'model_b_version': t['model_b_version'],
+                'model_a_accuracy': t['model_a_accuracy'],
+                'model_b_accuracy': t['model_b_accuracy'],
+                'accuracy_delta': t['accuracy_delta'],
+                'num_samples': t['num_samples'],
+                'winner': winner,
+                'status': t['status']
+            })
+        
+        return jsonify({'tests': result})
+        
+    except Exception as e:
+        print(f"Error in get_ab_test_history: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/get_available_models")
+def get_available_models():
+    """
+    Get list of available models for A/B testing.
+    Returns local lab models and global model versions.
+    """
+    try:
+        # Get local lab models
+        local_models = []
+        models_dir = os.path.join(os.path.dirname(__file__), 'models')
+        
+        # Check for lab-specific models
+        lab_updates = sb().table('fl_client_updates').select('client_label').execute()
+        lab_labels = list(set([r['client_label'] for r in (lab_updates.data or []) if r['client_label']]))
+        
+        for lab_label in lab_labels:
+            model_path = model_path_for_lab(lab_label)
+            if os.path.exists(model_path):
+                local_models.append({
+                    'type': 'local',
+                    'lab_label': lab_label,
+                    'display_name': f"Local: {lab_label}"
+                })
+        
+        # Get global model versions
+        global_models = []
+        global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(5).execute()
+        
+        for gm in (global_model_result.data or []):
+            global_models.append({
+                'type': 'global',
+                'version': gm['version'],
+                'display_name': f"Global v{gm['version']}"
+            })
+        
+        # Also check for local global.pkl file
+        global_path = os.path.join(models_dir, 'global.pkl')
+        if os.path.exists(global_path) and not global_models:
+            global_models.append({
+                'type': 'global',
+                'version': 1,
+                'display_name': 'Global v1 (Local)'
+            })
+        
+        return jsonify({
+            'local_models': local_models,
+            'global_models': global_models
+        })
+        
+    except Exception as e:
+        print(f"Error in get_available_models: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/admin/create_test_dataset")
+def create_test_dataset():
+    """
+    Split current patient data into train/test sets.
+    Moves a percentage of records to the test dataset.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        test_percentage = body.get('test_percentage', 20)  # Default 20%
+        
+        # Get all patient records
+        records = sb().table('patient_records').select('*').execute()
+        
+        if not records.data or len(records.data) < 5:
+            return jsonify({'error': 'Not enough patient records to create test set (minimum 5 required)'}), 400
+        
+        total_records = len(records.data)
+        num_test = max(1, int(total_records * test_percentage / 100))
+        
+        # Randomly select records for test set
+        import random
+        test_indices = random.sample(range(total_records), num_test)
+        
+        # Insert selected records into test table
+        test_records_created = 0
+        for idx in test_indices:
+            record = records.data[idx]
+            
+            # Create test record
+            sb().table('fl_test_patient_records').insert({
+                'original_record_id': record.get('id'),
+                'lab_label': record.get('lab_label'),
+                'patient_data': record,
+                'actual_diagnosis': ['healthy', 'diabetes', 'hypertension', 'heart_disease'][record.get('disease_label', 0)],
+                'is_active': True
+            }).execute()
+            test_records_created += 1
+        
+        return jsonify({
+            'success': True,
+            'total_records': total_records,
+            'test_records_created': test_records_created,
+            'test_percentage': test_percentage,
+            'message': f'Created {test_records_created} test records ({test_percentage}% of {total_records} total)'
+        })
+        
+    except Exception as e:
+        print(f"Error in create_test_dataset: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/get_test_dataset_info")
+def get_test_dataset_info():
+    """
+    Get information about the current held-out test dataset.
+    """
+    try:
+        # Count active test records
+        test_records = sb().table('fl_test_patient_records').select('*').eq('is_active', True).execute()
+        
+        if not test_records.data:
+            return jsonify({
+                'has_test_dataset': False,
+                'num_samples': 0,
+                'message': 'No held-out test dataset. Use random sampling for A/B tests.'
+            })
+        
+        # Analyze test dataset composition
+        diagnosis_counts = {}
+        lab_counts = {}
+        
+        for record in test_records.data:
+            diagnosis = record.get('actual_diagnosis', 'unknown')
+            lab = record.get('lab_label', 'unknown')
+            
+            diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
+            lab_counts[lab] = lab_counts.get(lab, 0) + 1
+        
+        return jsonify({
+            'has_test_dataset': True,
+            'num_samples': len(test_records.data),
+            'diagnosis_distribution': diagnosis_counts,
+            'lab_distribution': lab_counts
+        })
+        
+    except Exception as e:
+        print(f"Error in get_test_dataset_info: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

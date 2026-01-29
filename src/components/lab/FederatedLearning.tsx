@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { getModelUpdatesByLab, addModelUpdate, getAllModelUpdates } from '../../utils/mockData';
-import { Brain, Upload, TrendingUp, CheckCircle, Download, RefreshCw, AlertCircle } from 'lucide-react';
+import { Brain, Upload, TrendingUp, CheckCircle, Download, RefreshCw, AlertCircle, Bell, BellOff } from 'lucide-react';
 
 interface GlobalModelInfo {
   available: boolean;
@@ -38,6 +38,13 @@ export default function FederatedLearning() {
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [improvementMetrics, setImprovementMetrics] = useState<ImprovementMetrics | null>(null);
+  
+  // Auto-sync state
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [isTogglingAutoSync, setIsTogglingAutoSync] = useState(false);
+  const [pendingUpdate, setPendingUpdate] = useState<{ version: number; broadcast_id: string } | null>(null);
+  const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+  
   const serverUrl = 'http://localhost:5001';
 
   const labUpdates = user ? getModelUpdatesByLab(user.id) : [];
@@ -95,10 +102,26 @@ export default function FederatedLearning() {
       }
       
       setDownloadSuccess(true);
+      setPendingUpdate(null); // Clear pending update after download
+      setShowUpdateNotification(false);
+      
       setTimeout(() => {
         setDownloadSuccess(false);
         setImprovementMetrics(null); // Clear after showing
       }, 5000);
+      
+      // Acknowledge download to server if there was a broadcast
+      if (pendingUpdate?.broadcast_id) {
+        const labLabel = user?.labName || user?.email || 'lab_sim';
+        await fetch(`${serverUrl}/lab/acknowledge_download`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            lab_label: labLabel, 
+            broadcast_id: pendingUpdate.broadcast_id 
+          }),
+        });
+      }
       
       // Refresh global model info
       checkGlobalModel();
@@ -110,10 +133,84 @@ export default function FederatedLearning() {
     }
   };
 
+  // Toggle auto-sync preference
+  const handleToggleAutoSync = async () => {
+    if (!user) return;
+    
+    setIsTogglingAutoSync(true);
+    try {
+      const labLabel = user?.labName || user?.email || 'lab_sim';
+      const newValue = !autoSyncEnabled;
+      
+      const response = await fetch(`${serverUrl}/lab/enable_auto_sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lab_label: labLabel, enabled: newValue }),
+      });
+      
+      if (response.ok) {
+        setAutoSyncEnabled(newValue);
+      }
+    } catch (error) {
+      console.error('Error toggling auto-sync:', error);
+    } finally {
+      setIsTogglingAutoSync(false);
+    }
+  };
+
+  // Check for pushed updates
+  const checkForPushedUpdates = async () => {
+    if (!user) return;
+    
+    try {
+      const labLabel = user?.labName || user?.email || 'lab_sim';
+      const response = await fetch(`${serverUrl}/lab/check_for_updates?lab_label=${encodeURIComponent(labLabel)}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.new_model_available) {
+          setPendingUpdate({ version: data.version, broadcast_id: data.broadcast_id });
+          setShowUpdateNotification(true);
+          
+          // Auto-download if auto-sync is enabled
+          if (autoSyncEnabled) {
+            handleDownloadGlobal();
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+    }
+  };
+
+  // Load auto-sync status on mount
+  const loadAutoSyncStatus = async () => {
+    if (!user) return;
+    
+    try {
+      const labLabel = user?.labName || user?.email || 'lab_sim';
+      const response = await fetch(`${serverUrl}/lab/get_auto_sync_status?lab_label=${encodeURIComponent(labLabel)}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAutoSyncEnabled(data.auto_sync_enabled || false);
+      }
+    } catch (error) {
+      console.error('Error loading auto-sync status:', error);
+    }
+  };
+
   // Check for global model on mount and periodically
   useEffect(() => {
     checkGlobalModel();
-    const interval = setInterval(checkGlobalModel, 60000); // Check every minute
+    loadAutoSyncStatus();
+    checkForPushedUpdates();
+    
+    const interval = setInterval(() => {
+      checkGlobalModel();
+      checkForPushedUpdates();
+    }, 30000); // Check every 30 seconds
+    
     return () => clearInterval(interval);
   }, [user]);
 
@@ -204,6 +301,82 @@ export default function FederatedLearning() {
             <CheckCircle className="w-10 h-10 text-blue-600" />
           </div>
         </div>
+      </div>
+
+      {/* Update Notification Toast */}
+      {showUpdateNotification && pendingUpdate && !autoSyncEnabled && (
+        <div className="fixed top-4 right-4 z-50 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg shadow-2xl p-4 max-w-sm animate-bounce">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center">
+              <Bell className="w-6 h-6 mr-3 animate-pulse" />
+              <div>
+                <p className="font-semibold">New Global Model Available!</p>
+                <p className="text-sm text-blue-100">Version {pendingUpdate.version} is ready to download</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setShowUpdateNotification(false)}
+              className="text-white/80 hover:text-white ml-2"
+            >
+              ×
+            </button>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={handleDownloadGlobal}
+              disabled={isDownloading}
+              className="flex-1 bg-white text-indigo-600 py-2 px-4 rounded font-medium text-sm hover:bg-blue-50"
+            >
+              Download Now
+            </button>
+            <button
+              onClick={() => setShowUpdateNotification(false)}
+              className="px-3 py-2 text-white/80 hover:text-white text-sm"
+            >
+              Later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Sync Toggle Card */}
+      <div className="bg-white rounded-lg shadow p-4 border-l-4 border-indigo-500">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            {autoSyncEnabled ? (
+              <Bell className="w-6 h-6 text-indigo-600 mr-3" />
+            ) : (
+              <BellOff className="w-6 h-6 text-gray-400 mr-3" />
+            )}
+            <div>
+              <h4 className="font-semibold text-gray-900">Auto-Sync Global Models</h4>
+              <p className="text-sm text-gray-600">
+                {autoSyncEnabled 
+                  ? 'New global models will be downloaded automatically when pushed by admin'
+                  : 'You will receive a notification when new models are available'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleToggleAutoSync}
+            disabled={isTogglingAutoSync}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+              autoSyncEnabled ? 'bg-indigo-600' : 'bg-gray-200'
+            } ${isTogglingAutoSync ? 'opacity-50' : ''}`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                autoSyncEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+        {autoSyncEnabled && (
+          <div className="mt-2 flex items-center text-xs text-green-600">
+            <CheckCircle className="w-3 h-3 mr-1" />
+            Auto-sync is enabled - you're always up to date
+          </div>
+        )}
       </div>
 
       {/* Global Model Download Section */}

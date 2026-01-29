@@ -1,4 +1,25 @@
-<!-- 800c72d8-7fce-40d3-8341-0c1adbfd2319 92ae4d32-94c1-45c2-972f-06be57ea2948 -->
+---
+name: Lab Enhancements and Multiclass Federated Learning
+overview: ""
+todos:
+  - id: b4fdfeb6-1d70-45ee-832a-bbe67dc0eb5b
+    content: Add full_name, contact_phone, assigned_lab_id, and lab_name columns to users table via migration
+    status: pending
+  - id: a72a3d50-cc00-42de-9964-da67a05391c6
+    content: Create src/lib/supabase.ts with initialized Supabase client using env variables
+    status: pending
+  - id: c27fba48-5b20-4105-a19b-e695cb4e1e22
+    content: Add login/signup toggle and signup form fields to Login.tsx
+    status: pending
+  - id: a092b749-64ca-49f9-8268-76283d120dcc
+    content: Replace mock auth with Supabase auth functions (login, signup, logout) in AuthContext.tsx
+    status: pending
+  - id: 23cf4538-5233-4001-b112-9d93c968dbf8
+    content: Ensure .env.local has correct Supabase URL and anon key
+    status: pending
+isProject: false
+---
+
 # Lab Enhancements and Multiclass Federated Learning
 
 ## Backend
@@ -47,11 +68,3 @@
 - Start backend (Flask) and frontend.
 - Lab A & Lab B: submit records; see predictions and history.
 - Admin: aggregate; see accuracy and version update.
-
-### To-dos
-
-- [ ] Add full_name, contact_phone, assigned_lab_id, and lab_name columns to users table via migration
-- [ ] Create src/lib/supabase.ts with initialized Supabase client using env variables
-- [ ] Add login/signup toggle and signup form fields to Login.tsx
-- [ ] Replace mock auth with Supabase auth functions (login, signup, logout) in AuthContext.tsx
-- [ ] Ensure .env.local has correct Supabase URL and anon key

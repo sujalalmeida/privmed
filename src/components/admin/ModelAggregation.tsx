@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Brain, Users, TrendingUp, Database, RefreshCw, Zap, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Brain, Users, TrendingUp, Database, RefreshCw, Zap, CheckCircle, AlertCircle, Clock, Send } from 'lucide-react';
+import PushModelModal from './PushModelModal';
+import BroadcastHistory from './BroadcastHistory';
 
 interface LabStatus {
   lab: string;
@@ -46,6 +48,7 @@ export default function ModelAggregation() {
   const [lastResult, setLastResult] = useState<AggregationResult | null>(null);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
+  const [showPushModal, setShowPushModal] = useState(false);
 
   // Load aggregation status
   const loadStatus = async () => {
@@ -202,6 +205,17 @@ export default function ModelAggregation() {
             )}
           </button>
 
+          <button
+            onClick={() => setShowPushModal(true)}
+            disabled={(status?.current_global_model.version || 0) === 0}
+            className="bg-gradient-to-r from-green-600 to-emerald-600 text-white py-3 px-6 rounded-lg font-semibold
+                     hover:from-green-700 hover:to-emerald-700 disabled:from-gray-400 disabled:to-gray-500 
+                     disabled:cursor-not-allowed transition-all duration-200 flex items-center shadow-lg"
+          >
+            <Send className="w-5 h-5 mr-2" />
+            Push to All Labs
+          </button>
+
           <div className="text-sm text-gray-600">
             <div className="flex items-center">
               <input
@@ -347,6 +361,17 @@ export default function ModelAggregation() {
           </div>
         </div>
       )}
+
+      {/* Broadcast History */}
+      <BroadcastHistory serverUrl={serverUrl} />
+
+      {/* Push Model Modal */}
+      <PushModelModal
+        isOpen={showPushModal}
+        onClose={() => setShowPushModal(false)}
+        serverUrl={serverUrl}
+        globalModelVersion={status?.current_global_model.version || 0}
+      />
     </div>
   );
 }
