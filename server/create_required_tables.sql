@@ -102,7 +102,8 @@ create table if not exists public.fl_client_updates (
   local_accuracy double precision,
   grad_norm double precision,
   num_examples int,
-  storage_path text
+  storage_path text,
+  aggregated_in_round int null  -- NULL = not yet aggregated, otherwise round number it was used in
 );
 
 -- Stores global models produced by aggregation.

@@ -1436,9 +1436,16 @@ def send_model_update():
 def aggregate_models():
     """Enhanced model aggregation with FedAvg algorithm and comprehensive metrics"""
     try:
+        # Get next round number
+        try:
+            latest_round = sb().table('fl_round_metrics').select('round').order('round', desc=True).limit(1).execute()
+            next_round = (latest_round.data[0]['round'] + 1) if latest_round.data else 1
+        except:
+            next_round = 1
+            
         # Get latest local models from each lab (one per lab)
         try:
-            # Get most recent update per lab
+            # Get most recent update per lab with valid storage_path
             updates = sb().table('fl_client_updates').select('*').not_.is_('storage_path', 'null').order('created_at', desc=True).execute()
             if not updates.data:
                 return jsonify({'error': 'no local model updates found'}), 400
@@ -1451,7 +1458,7 @@ def aggregate_models():
                     lab_updates[lab] = update
             
             updates_list = list(lab_updates.values())
-            print(f"Found {len(updates_list)} labs with models: {list(lab_updates.keys())}")
+            print(f"Found {len(updates_list)} labs with models for round {next_round}: {list(lab_updates.keys())}")
             
         except Exception as e:
             print(f"Error fetching client updates: {e}")

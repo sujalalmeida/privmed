@@ -42,12 +42,28 @@ const DEMO_USERS: Record<string, User> = {
     contactPhone: '123-456-7892',
     labName: 'Lab B',
   },
+  'lab3@demo.com': {
+    id: 'demo-lab-c',
+    email: 'lab3@demo.com',
+    fullName: 'Lab C',
+    role: 'lab',
+    contactPhone: '123-456-7893',
+    labName: 'Lab C',
+  },
+  'lab4@demo.com': {
+    id: 'demo-lab-d',
+    email: 'lab4@demo.com',
+    fullName: 'Lab D',
+    role: 'lab',
+    contactPhone: '123-456-7894',
+    labName: 'Lab D',
+  },
   'admin@demo.com': {
     id: 'demo-admin',
     email: 'admin@demo.com',
     fullName: 'Sujal',
     role: 'central_admin',
-    contactPhone: '123-456-7893',
+    contactPhone: '123-456-7895',
   },
 };
 
@@ -102,11 +118,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (data) {
+        // Map existing schema (user_type) to application's expected format (role)
         const userData: User = {
           id: data.id,
           email: data.email,
-          fullName: data.full_name || '',
-          role: data.role,
+          fullName: data.full_name || data.lab_name || '',
+          role: data.role || data.user_type || 'patient', // Fallback to user_type
           contactPhone: data.contact_phone,
           assignedLabId: data.assigned_lab_id,
           labName: data.lab_name,
@@ -212,20 +229,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (data.user) {
-        // Insert user profile into users table
+        // Insert user profile into users table matching existing schema
+        // Columns: id, email, password_hash, user_type, lab_name, created_at, updated_at
         const { error: profileError } = await supabase
           .from('users')
           .insert({
             id: data.user.id,
             email: data.user.email,
-            role,
-            full_name: fullName,
-            contact_phone: contactPhone || null,
+            user_type: role,
             lab_name: role === 'lab' ? fullName : null,
           });
 
         if (profileError) {
           console.error('Profile creation error:', profileError);
+          console.error('Error details:', profileError.message, profileError.code, profileError.hint);
           return false;
         }
 

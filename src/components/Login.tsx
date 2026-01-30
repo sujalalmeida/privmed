@@ -10,7 +10,7 @@ export default function Login() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
-  const [role, setRole] = useState<'patient' | 'lab' | 'central_admin'>('patient');
+  const [role, setRole] = useState<'patient' | 'lab'>('patient');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login, signup, user } = useAuth();
@@ -70,7 +70,6 @@ export default function Login() {
   const roleLabels = {
     patient: { label: 'Patient', desc: 'View reports and health data' },
     lab: { label: 'Lab Technician', desc: 'Process clinical data' },
-    central_admin: { label: 'Administrator', desc: 'Manage system and models' },
   };
 
   return (
@@ -120,7 +119,7 @@ export default function Login() {
                 I am a...
               </label>
               <div className="space-y-2">
-                {(['patient', 'lab', 'central_admin'] as const).map((r) => (
+                {(['patient', 'lab'] as const).map((r) => (
                   <button
                     key={r}
                     type="button"
