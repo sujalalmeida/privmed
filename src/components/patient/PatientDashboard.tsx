@@ -3,9 +3,10 @@ import Layout from '../Layout';
 import UploadReport from './UploadReport';
 import ViewReports from './ViewReports';
 import Profile from './Profile';
-import { Upload, FileText, User } from 'lucide-react';
+import ChooseLab from './ChooseLab';
+import { Upload, FileText, User, Building2 } from 'lucide-react';
 
-type Tab = 'upload' | 'reports' | 'profile';
+type Tab = 'upload' | 'reports' | 'labs' | 'profile';
 
 export default function PatientDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('upload');
@@ -13,6 +14,7 @@ export default function PatientDashboard() {
   const tabs = [
     { id: 'upload' as Tab, label: 'Upload Report', icon: Upload },
     { id: 'reports' as Tab, label: 'My Reports', icon: FileText },
+    { id: 'labs' as Tab, label: 'Choose Lab', icon: Building2 },
     { id: 'profile' as Tab, label: 'Profile', icon: User },
   ];
 
@@ -39,6 +41,7 @@ export default function PatientDashboard() {
       <div>
         {activeTab === 'upload' && <UploadReport />}
         {activeTab === 'reports' && <ViewReports />}
+        {activeTab === 'labs' && <ChooseLab />}
         {activeTab === 'profile' && <Profile />}
       </div>
     </Layout>

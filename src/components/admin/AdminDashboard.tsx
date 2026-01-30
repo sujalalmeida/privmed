@@ -4,15 +4,17 @@ import IncomingReports from './IncomingReports';
 import ModelAggregation from './ModelAggregation';
 import RoundHistory from './RoundHistory';
 import ABTestDashboard from './ABTestDashboard';
-import { FileText, Brain, Activity, FlaskConical } from 'lucide-react';
+import FeedbackStats from './FeedbackStats';
+import { FileText, Brain, Activity, FlaskConical, BarChart3 } from 'lucide-react';
 
-type Tab = 'reports' | 'models' | 'rounds' | 'abtest';
+type Tab = 'reports' | 'models' | 'rounds' | 'abtest' | 'feedback';
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('reports');
 
   const tabs = [
     { id: 'reports' as Tab, label: 'Incoming Reports', icon: FileText },
+    { id: 'feedback' as Tab, label: 'Feedback Stats', icon: BarChart3 },
     { id: 'models' as Tab, label: 'Model Aggregation', icon: Brain },
     { id: 'rounds' as Tab, label: 'FL Performance', icon: Activity },
     { id: 'abtest' as Tab, label: 'A/B Testing', icon: FlaskConical },
@@ -40,6 +42,7 @@ export default function AdminDashboard() {
 
       <div>
         {activeTab === 'reports' && <IncomingReports />}
+        {activeTab === 'feedback' && <FeedbackStats />}
         {activeTab === 'models' && <ModelAggregation />}
         {activeTab === 'rounds' && <RoundHistory />}
         {activeTab === 'abtest' && <ABTestDashboard />}

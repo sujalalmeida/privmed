@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# MedSafe FL Paper Metrics - Complete Setup Script
+# PrivMed FL Paper Metrics - Complete Setup Script
 # This script sets up the entire metrics collection system
 
 set -e  # Exit on error
 
 echo "================================================"
-echo "MedSafe FL Paper Metrics - Complete Setup"
+echo "PrivMed FL Paper Metrics - Complete Setup"
 echo "================================================"
 echo ""
 

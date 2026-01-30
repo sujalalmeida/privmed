@@ -1,4 +1,4 @@
--- MedSafe FL Paper Metrics Tables
+-- PrivMed FL Paper Metrics Tables
 -- Additional tables for collecting experiment-level and detailed per-round metrics
 -- Run this in Supabase Dashboard → SQL Editor after create_required_tables.sql
 

@@ -1,5 +1,5 @@
 """
-Federated Learning Metrics Module for MedSafe Paper
+Federated Learning Metrics Module for PrivMed Paper
 
 Provides comprehensive metric computation including:
 - Per-class metrics (precision, recall, specificity, F1, AUC-ROC)
@@ -7,7 +7,7 @@ Provides comprehensive metric computation including:
 - Confusion matrix analysis
 - Multi-class evaluation utilities
 
-Author: MedSafe Team
+Author: PrivMed Team
 """
 
 import numpy as np
@@ -22,7 +22,7 @@ from sklearn.metrics import (
 import warnings
 warnings.filterwarnings('ignore')
 
-# Class names for MedSafe diagnosis
+# Class names for PrivMed diagnosis
 CLASS_NAMES = ['healthy', 'diabetes', 'hypertension', 'heart_disease']
 
 

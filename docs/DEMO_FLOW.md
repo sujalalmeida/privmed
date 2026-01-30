@@ -1,6 +1,6 @@
-# MedSafe Federated Learning Demo Flow
+# PrivMed Federated Learning Demo Flow
 
-This guide provides step-by-step instructions for demonstrating MedSafe's federated learning capabilities. Follow this flow to show how global model accuracy improves as more labs contribute data and participate in aggregation rounds.
+This guide provides step-by-step instructions for demonstrating PrivMed's federated learning capabilities. Follow this flow to show how global model accuracy improves as more labs contribute data and participate in aggregation rounds.
 
 ## Prerequisites
 

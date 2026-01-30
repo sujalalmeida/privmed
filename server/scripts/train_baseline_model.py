@@ -1,5 +1,5 @@
 """
-Train Baseline Model for MedSafe Federated Learning
+Train Baseline Model for PrivMed Federated Learning
 
 This script trains a baseline global model on the combined real dataset.
 The model will be shipped as the initial global model for federated learning.
@@ -232,7 +232,7 @@ def save_model(model, scaler, model_name: str, test_metrics: dict):
 def main():
     """Main training pipeline."""
     print("=" * 60)
-    print("MedSafe Baseline Model Training")
+    print("PrivMed Baseline Model Training")
     print("=" * 60)
     
     # Load data

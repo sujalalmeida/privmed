@@ -30,7 +30,7 @@ export default function Layout({ children, title }: LayoutProps) {
               </div>
               <div className="flex flex-col">
                 <span className="text-lg font-semibold text-neutral-900 leading-tight">
-                  MedSafe
+                  PrivMed
                 </span>
                 <span className="text-xs text-neutral-500 leading-tight">
                   Clinical Data Platform

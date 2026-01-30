@@ -81,7 +81,7 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-14 h-14 bg-primary-500 rounded-xl mb-4">
             <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-semibold text-neutral-900">MedSafe</h1>
+          <h1 className="text-2xl font-semibold text-neutral-900">PrivMed</h1>
           <p className="text-sm text-neutral-500 mt-1">Clinical Data Platform</p>
         </div>
 

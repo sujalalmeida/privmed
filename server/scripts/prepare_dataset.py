@@ -1,5 +1,5 @@
 """
-Prepare Unified Dataset for MedSafe Federated Learning
+Prepare Unified Dataset for PrivMed Federated Learning
 
 This script:
 1. Loads raw datasets (heart disease, diabetes, hypertension, healthy)
@@ -541,7 +541,7 @@ def generate_metadata(df: pd.DataFrame, train_df: pd.DataFrame, val_df: pd.DataF
 def main():
     """Main dataset preparation pipeline."""
     print("=" * 60)
-    print("MedSafe Dataset Preparation")
+    print("PrivMed Dataset Preparation")
     print("=" * 60)
     
     # Load raw datasets

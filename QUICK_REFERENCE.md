@@ -1,4 +1,4 @@
-# MedSafe FL Metrics - Quick Reference Card
+# PrivMed FL Metrics - Quick Reference Card
 
 **One-page reference for common tasks**
 

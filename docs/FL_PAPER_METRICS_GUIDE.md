@@ -1,4 +1,4 @@
-# MedSafe FL Paper Metrics Collection & Export
+# PrivMed FL Paper Metrics Collection & Export
 
 Complete guide for collecting and exporting federated learning metrics for research paper analysis.
 
@@ -680,4 +680,4 @@ if len(predictions_data) > 10000:
 
 **Last Updated**: January 30, 2026  
 **Version**: 1.0.0  
-**Authors**: MedSafe Team
+**Authors**: PrivMed Team

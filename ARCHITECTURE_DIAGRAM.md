@@ -1,8 +1,8 @@
-# MedSafe FL Metrics System - Visual Architecture
+# PrivMed FL Metrics System - Visual Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MEDSAFE FL METRICS SYSTEM                            │
+│                         PRIVMED FL METRICS SYSTEM                            │
 │                    Comprehensive Paper Data Collection                       │
 └─────────────────────────────────────────────────────────────────────────────┘
 

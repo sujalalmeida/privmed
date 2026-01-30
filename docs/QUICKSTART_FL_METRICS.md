@@ -1,10 +1,10 @@
-# MedSafe FL Paper Metrics - Quick Start Guide
+# PrivMed FL Paper Metrics - Quick Start Guide
 
 Get up and running with comprehensive FL metrics collection in 5 minutes.
 
 ## Prerequisites
 
-- MedSafe FL system running (server/app.py)
+- PrivMed FL system running (server/app.py)
 - Supabase database configured
 - Python 3.8+ with scikit-learn, pandas, numpy installed
 
@@ -171,7 +171,7 @@ cd server
 python -c "import fl_logging; print('OK')"
 
 # Or add to PYTHONPATH:
-export PYTHONPATH="${PYTHONPATH}:/path/to/medsafe/server"
+export PYTHONPATH="${PYTHONPATH}:/path/to/privmed/server"
 ```
 
 ### "Tables don't exist"

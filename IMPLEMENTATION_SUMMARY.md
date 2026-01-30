@@ -1,4 +1,4 @@
-# MedSafe FL Paper Metrics - Implementation Summary
+# PrivMed FL Paper Metrics - Implementation Summary
 
 **Date**: January 30, 2026  
 **Status**: ✅ Complete and Ready to Use

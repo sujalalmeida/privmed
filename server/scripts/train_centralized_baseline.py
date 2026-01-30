@@ -1,5 +1,5 @@
 """
-Train Centralized Baseline and Log Metrics for MedSafe FL Paper
+Train Centralized Baseline and Log Metrics for PrivMed FL Paper
 
 Extended version of train_baseline_model.py that:
 1. Trains centralized model on all training data
@@ -322,7 +322,7 @@ def main():
     args = parser.parse_args()
     
     print("=" * 60)
-    print("MedSafe Centralized Baseline Training with Metrics Logging")
+    print("PrivMed Centralized Baseline Training with Metrics Logging")
     print("=" * 60)
     print(f"\nExperiment ID: {args.experiment_id}")
     print(f"Log to DB: {args.log_to_db}")

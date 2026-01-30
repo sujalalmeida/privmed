@@ -1,19 +1,155 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { getAllReports, addDiagnosis, updateReportStatus } from '../../utils/mockData';
-import { ArrowLeft, Lock, Brain, Send } from 'lucide-react';
+import { ArrowLeft, Lock, Brain, Send, ThumbsUp, ThumbsDown, AlertCircle } from 'lucide-react';
 
 interface EvaluateReportProps {
   reportId: string;
   onClose: () => void;
 }
 
+interface ReportData {
+  id: string;
+  patient_id: string;
+  lab_label: string;
+  diagnosis: number;
+  diagnosis_label: string;
+  confidence: number;
+  probabilities: number[] | null;
+  created_at: string;
+  age: number | null;
+  sex: string | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  bmi: number | null;
+  systolic_bp: number | null;
+  diastolic_bp: number | null;
+  heart_rate: number | null;
+  fasting_glucose: number | null;
+  hba1c: number | null;
+  total_cholesterol: number | null;
+  ldl_cholesterol: number | null;
+  hdl_cholesterol: number | null;
+  triglycerides: number | null;
+}
+
+interface FeedbackData {
+  id: string;
+  agree: boolean;
+  correct_diagnosis: number | null;
+  correct_diagnosis_label: string | null;
+  remarks: string | null;
+  reviewer_name: string | null;
+  created_at: string;
+}
+
+const DIAGNOSIS_OPTIONS = [
+  { value: 0, label: 'Healthy' },
+  { value: 1, label: 'Diabetes' },
+  { value: 2, label: 'Hypertension' },
+  { value: 3, label: 'Heart Disease' },
+];
+
+const API_BASE = 'http://localhost:5001';
+
 export default function EvaluateReport({ reportId, onClose }: EvaluateReportProps) {
   const { user } = useAuth();
-  const report = getAllReports().find(r => r.id === reportId);
-  const [diagnosisResult, setDiagnosisResult] = useState('');
-  const [doctorRemarks, setDoctorRemarks] = useState('');
+  const [report, setReport] = useState<ReportData | null>(null);
+  const [existingFeedback, setExistingFeedback] = useState<FeedbackData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Feedback form state
+  const [agree, setAgree] = useState<boolean | null>(null);
+  const [correctDiagnosis, setCorrectDiagnosis] = useState<number | null>(null);
+  const [remarks, setRemarks] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  useEffect(() => {
+    const fetchReport = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        const response = await fetch(`${API_BASE}/admin/reports/${reportId}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to fetch report');
+        }
+        
+        const data = await response.json();
+        setReport(data.report);
+        
+        if (data.feedback) {
+          setExistingFeedback(data.feedback);
+          setAgree(data.feedback.agree);
+          setCorrectDiagnosis(data.feedback.correct_diagnosis);
+          setRemarks(data.feedback.remarks || '');
+        }
+      } catch (err) {
+        console.error('Error fetching report:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load report');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchReport();
+  }, [reportId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (agree === null) {
+      setError('Please select whether you agree or disagree with the AI prediction');
+      return;
+    }
+
+    setIsSending(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/admin/reports/${reportId}/feedback`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          agree,
+          correct_diagnosis: !agree ? correctDiagnosis : null,
+          remarks,
+          reviewer_id: user?.id || 'admin',
+          reviewer_name: user?.fullName || 'Admin',
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to submit feedback');
+      }
+
+      setSubmitSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 1500);
+    } catch (err) {
+      console.error('Error submitting feedback:', err);
+      setError(err instanceof Error ? err.message : 'Failed to submit feedback');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg shadow p-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <span className="ml-3 text-gray-600">Loading report...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!report) {
     return (
@@ -26,28 +162,7 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
     );
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-
-    setIsSending(true);
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    addDiagnosis({
-      reportId: report.id,
-      doctorId: user.id,
-      doctorName: user.fullName,
-      encryptedFeedback: 'encrypted_' + Date.now(),
-      diagnosisResult,
-      confidenceScore: report.aiPrediction?.[0]?.confidence || 0.85,
-    });
-
-    updateReportStatus(report.id, 'diagnosed');
-
-    setIsSending(false);
-    onClose();
-  };
+  const probabilities = report.probabilities || [];
 
   return (
     <div className="space-y-6">
@@ -60,7 +175,25 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
           Back
         </button>
         <h2 className="text-2xl font-bold text-gray-900">Evaluate Report</h2>
+        {existingFeedback && (
+          <span className="ml-4 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
+            Previously Reviewed
+          </span>
+        )}
       </div>
+
+      {submitSuccess && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+          <p className="text-green-800 font-medium">✓ Feedback submitted successfully!</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center">
+          <AlertCircle className="w-5 h-5 text-red-600 mr-2" />
+          <p className="text-red-800">{error}</p>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow p-6">
         <div className="mb-6">
@@ -72,87 +205,184 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-gray-600">Anonymous ID:</span>
-              <span className="ml-2 font-medium text-gray-900">{report.patientName}</span>
-            </div>
-            <div>
-              <span className="text-gray-600">Test Type:</span>
-              <span className="ml-2 font-medium text-gray-900">{report.testType}</span>
+              <span className="text-gray-600">Patient ID:</span>
+              <span className="ml-2 font-medium text-gray-900">{report.patient_id || 'Unknown'}</span>
             </div>
             <div>
               <span className="text-gray-600">Lab:</span>
-              <span className="ml-2 font-medium text-gray-900">{report.labName}</span>
+              <span className="ml-2 font-medium text-gray-900">
+                {report.lab_label?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown'}
+              </span>
             </div>
             <div>
               <span className="text-gray-600">Date:</span>
               <span className="ml-2 font-medium text-gray-900">
-                {new Date(report.createdAt).toLocaleDateString()}
+                {report.created_at ? new Date(report.created_at).toLocaleDateString() : 'N/A'}
               </span>
+            </div>
+            <div>
+              <span className="text-gray-600">Age/Sex:</span>
+              <span className="ml-2 font-medium text-gray-900">
+                {report.age || 'N/A'} / {report.sex || 'N/A'}
+              </span>
+            </div>
+          </div>
+
+          {/* Clinical Data Summary */}
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <h4 className="font-medium text-gray-900 mb-2">Clinical Data</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              {report.systolic_bp && report.diastolic_bp && (
+                <div>
+                  <span className="text-gray-500">BP:</span>
+                  <span className="ml-1 font-medium">{report.systolic_bp}/{report.diastolic_bp} mmHg</span>
+                </div>
+              )}
+              {report.heart_rate && (
+                <div>
+                  <span className="text-gray-500">HR:</span>
+                  <span className="ml-1 font-medium">{report.heart_rate} bpm</span>
+                </div>
+              )}
+              {report.fasting_glucose && (
+                <div>
+                  <span className="text-gray-500">Glucose:</span>
+                  <span className="ml-1 font-medium">{report.fasting_glucose} mg/dL</span>
+                </div>
+              )}
+              {report.hba1c && (
+                <div>
+                  <span className="text-gray-500">HbA1c:</span>
+                  <span className="ml-1 font-medium">{report.hba1c}%</span>
+                </div>
+              )}
+              {report.total_cholesterol && (
+                <div>
+                  <span className="text-gray-500">Cholesterol:</span>
+                  <span className="ml-1 font-medium">{report.total_cholesterol} mg/dL</span>
+                </div>
+              )}
+              {report.bmi && (
+                <div>
+                  <span className="text-gray-500">BMI:</span>
+                  <span className="ml-1 font-medium">{report.bmi.toFixed(1)}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {report.aiPrediction && report.aiPrediction.length > 0 && (
-          <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center mb-3">
-              <Brain className="w-5 h-5 text-blue-600 mr-2" />
-              <h4 className="font-semibold text-blue-900">AI Model Predictions</h4>
+        {/* AI Prediction Section */}
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center mb-3">
+            <Brain className="w-5 h-5 text-blue-600 mr-2" />
+            <h4 className="font-semibold text-blue-900">AI Prediction</h4>
+          </div>
+          
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <span className="text-2xl font-bold text-blue-900 capitalize">
+                {report.diagnosis_label?.replace('_', ' ') || 'Unknown'}
+              </span>
+              <span className="ml-3 text-lg text-blue-700">
+                ({((report.confidence || 0) * 100).toFixed(1)}% confidence)
+              </span>
             </div>
+          </div>
+
+          {probabilities.length > 0 && (
             <div className="space-y-2">
-              {report.aiPrediction.map((pred, idx) => (
-                <div key={idx} className="flex items-center justify-between">
-                  <span className="text-sm text-blue-800">{pred.disease}</span>
-                  <div className="flex items-center">
-                    <div className="w-32 bg-blue-200 rounded-full h-2 mr-3">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full"
-                        style={{ width: `${pred.confidence * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-sm font-medium text-blue-900">
-                      {(pred.confidence * 100).toFixed(1)}%
-                    </span>
+              <p className="text-sm text-blue-800 font-medium">Probability Distribution:</p>
+              {DIAGNOSIS_OPTIONS.map((opt, idx) => (
+                <div key={opt.value} className="flex items-center">
+                  <span className="text-sm text-blue-800 w-28">{opt.label}</span>
+                  <div className="flex-1 bg-blue-200 rounded-full h-2 mr-3">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full"
+                      style={{ width: `${(probabilities[idx] || 0) * 100}%` }}
+                    />
                   </div>
+                  <span className="text-sm font-medium text-blue-900 w-16 text-right">
+                    {((probabilities[idx] || 0) * 100).toFixed(1)}%
+                  </span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
+        {/* Feedback Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Diagnosis Result
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Do you agree with the AI prediction?
             </label>
-            <input
-              type="text"
-              value={diagnosisResult}
-              onChange={(e) => setDiagnosisResult(e.target.value)}
-              placeholder="Enter diagnosis (e.g., Type 2 Diabetes detected)"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            />
+            <div className="flex space-x-4">
+              <button
+                type="button"
+                onClick={() => setAgree(true)}
+                className={`flex-1 flex items-center justify-center py-3 px-4 rounded-lg border-2 transition-colors ${
+                  agree === true
+                    ? 'border-green-500 bg-green-50 text-green-700'
+                    : 'border-gray-300 hover:border-green-300 text-gray-700'
+                }`}
+              >
+                <ThumbsUp className="w-5 h-5 mr-2" />
+                Agree
+              </button>
+              <button
+                type="button"
+                onClick={() => setAgree(false)}
+                className={`flex-1 flex items-center justify-center py-3 px-4 rounded-lg border-2 transition-colors ${
+                  agree === false
+                    ? 'border-red-500 bg-red-50 text-red-700'
+                    : 'border-gray-300 hover:border-red-300 text-gray-700'
+                }`}
+              >
+                <ThumbsDown className="w-5 h-5 mr-2" />
+                Disagree
+              </button>
+            </div>
           </div>
+
+          {agree === false && (
+            <div className="animate-in slide-in-from-top-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                What is the correct diagnosis?
+              </label>
+              <select
+                value={correctDiagnosis ?? ''}
+                onChange={(e) => setCorrectDiagnosis(e.target.value ? parseInt(e.target.value) : null)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">Select correct diagnosis (optional)</option>
+                {DIAGNOSIS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Doctor's Remarks
+              Remarks (optional)
             </label>
             <textarea
-              value={doctorRemarks}
-              onChange={(e) => setDoctorRemarks(e.target.value)}
-              placeholder="Enter your clinical remarks and recommendations"
-              rows={4}
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              placeholder="Enter any additional comments or clinical notes"
+              rows={3}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
             />
           </div>
 
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <p className="text-sm text-yellow-800">
-              Your feedback will be encrypted before being sent back to the lab and patient, maintaining complete privacy.
+              Your feedback helps improve the AI model and ensures quality of predictions across the federated learning network.
             </p>
           </div>
 
@@ -166,11 +396,11 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
             </button>
             <button
               type="submit"
-              disabled={isSending}
+              disabled={isSending || agree === null}
               className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium flex items-center justify-center"
             >
               <Send className="w-5 h-5 mr-2" />
-              {isSending ? 'Encrypting & Sending...' : 'Encrypt & Send Feedback'}
+              {isSending ? 'Submitting...' : existingFeedback ? 'Update Feedback' : 'Submit Feedback'}
             </button>
           </div>
         </form>

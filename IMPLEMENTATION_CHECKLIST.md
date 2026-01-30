@@ -1,4 +1,4 @@
-# MedSafe FL Paper Metrics - Implementation Checklist
+# PrivMed FL Paper Metrics - Implementation Checklist
 
 Use this checklist to ensure complete setup and integration of the FL metrics system.
 

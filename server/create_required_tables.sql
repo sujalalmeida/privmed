@@ -1,4 +1,4 @@
--- MedSafe required tables for backend + FL metadata
+-- PrivMed required tables for backend + FL metadata
 -- Run this in Supabase Dashboard → SQL Editor.
 
 create extension if not exists pgcrypto;

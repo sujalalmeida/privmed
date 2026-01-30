@@ -1,4 +1,4 @@
-# MedSafe FL Paper Metrics Collection System
+# PrivMed FL Paper Metrics Collection System
 
 **Status**: ✅ Complete - Ready for Use  
 **Version**: 1.0.0  
@@ -6,7 +6,7 @@
 
 ## Overview
 
-Comprehensive data collection and export system for MedSafe federated learning research paper. Automatically collects experiment-level, per-round, per-lab, and per-class metrics with minimal integration effort.
+Comprehensive data collection and export system for PrivMed federated learning research paper. Automatically collects experiment-level, per-round, per-lab, and per-class metrics with minimal integration effort.
 
 ## What's Included
 
@@ -194,7 +194,7 @@ All examples provided in `docs/FL_PAPER_METRICS_GUIDE.md`.
 
 ```
 ┌─────────────────────────────────────────┐
-│      MedSafe FL Pipeline (app.py)       │
+│      PrivMed FL Pipeline (app.py)       │
 │  ┌───────────────────────────────────┐  │
 │  │  Lab Training                     │  │
 │  │  ↓                                │  │
@@ -327,11 +327,11 @@ Contributions welcome:
 
 ## License
 
-Same as MedSafe project.
+Same as PrivMed project.
 
 ## Acknowledgments
 
-Built for MedSafe federated learning research project.
+Built for PrivMed federated learning research project.
 
 ---
 

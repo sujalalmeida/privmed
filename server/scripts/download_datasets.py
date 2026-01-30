@@ -1,5 +1,5 @@
 """
-Download Real Medical Datasets for MedSafe Federated Learning
+Download Real Medical Datasets for PrivMed Federated Learning
 
 Downloads:
 1. UCI Heart Disease Dataset
@@ -286,7 +286,7 @@ def generate_healthy_samples(n_samples: int = 500):
 def main():
     """Main download function."""
     print("=" * 60)
-    print("MedSafe Dataset Downloader")
+    print("PrivMed Dataset Downloader")
     print("=" * 60)
     
     ensure_directories()

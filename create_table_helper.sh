@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🗄️  Creating MedSafe Supabase Tables"
+echo "🗄️  Creating PrivMed Supabase Tables"
 echo "======================================"
 echo ""
 
@@ -16,7 +16,7 @@ echo "⚠️  IMPORTANT: You need to run this SQL in your Supabase Dashboard"
 echo ""
 echo "🔗 Steps:"
 echo "   1. Go to: https://app.supabase.com"
-echo "   2. Select your MedSafe project"
+echo "   2. Select your PrivMed project"
 echo "   3. Click 'SQL Editor' in the left sidebar"
 echo "   4. Click 'New Query'"
 echo "   5. Copy the SQL below and paste it there"

@@ -1549,6 +1549,48 @@ def aggregate_models():
         total_samples = sum(d['num_examples'] for d in models_data)
         print(f"Aggregating {len(models_data)} models with {n_features_aggregated} features, total samples: {total_samples}")
 
+        # ====================================================================
+        # FEEDBACK-BASED REWEIGHTING (Option A from closed-loop feedback)
+        # Labs with higher doctor agreement rates get more weight in aggregation
+        # ====================================================================
+        use_feedback_weights = True  # Set to False to disable feedback weighting
+        feedback_warnings = []
+        
+        if use_feedback_weights:
+            print("Applying feedback-based weight adjustments...")
+            for data in models_data:
+                lab = data['lab']
+                agreement_info = get_lab_agreement_rate(lab)
+                agreement_rate = agreement_info['rate']
+                feedback_count = agreement_info['total']
+                
+                # Only apply adjustment if there's sufficient feedback (at least 3 reviews)
+                if feedback_count >= 3:
+                    # Agreement factor: 0.5 (50% agreement) to 1.0 (100% agreement)
+                    # Labs with low agreement get their weight reduced
+                    agreement_factor = 0.5 + (0.5 * agreement_rate)
+                    
+                    # Adjust the effective sample count based on agreement
+                    original_samples = data['num_examples']
+                    data['num_examples'] = int(original_samples * agreement_factor)
+                    
+                    print(f"  {lab}: agreement={agreement_rate:.1%} ({feedback_count} reviews), "
+                          f"factor={agreement_factor:.2f}, samples {original_samples} -> {data['num_examples']}")
+                    
+                    # Flag labs with low agreement (below 60%)
+                    if agreement_rate < 0.6:
+                        feedback_warnings.append({
+                            'lab': lab,
+                            'agreement_rate': agreement_rate,
+                            'message': f'{lab} has low doctor agreement ({agreement_rate:.0%}) - consider review'
+                        })
+                else:
+                    print(f"  {lab}: insufficient feedback ({feedback_count} reviews), using original weight")
+            
+            # Recalculate total samples after adjustments
+            total_samples = sum(d['num_examples'] for d in models_data)
+            print(f"Total weighted samples after feedback adjustment: {total_samples}")
+
         # Apply Federated Averaging (FedAvg)
         model_type = models_data[0]['params']['type']
         
@@ -1770,6 +1812,12 @@ def aggregate_models():
                 'accuracy_delta': accuracy_delta,
                 'convergence_rate': convergence_rate,
                 'improving': accuracy_delta > 0 if accuracy_delta is not None else None
+            },
+            # Feedback-based reweighting info (Option A)
+            'feedback_weighting': {
+                'enabled': use_feedback_weights,
+                'warnings': feedback_warnings,
+                'message': 'Labs with higher doctor agreement rates contributed more weight' if use_feedback_weights else None
             }
         })
         
@@ -1801,8 +1849,8 @@ def get_aggregation_status():
                     lab_status[lab] = {
                         'lab': lab,
                         'last_update': update['created_at'],
-                        'local_accuracy': update.get('local_accuracy'),
-                        'num_examples': update.get('num_examples'),
+                        'local_accuracy': update.get('local_accuracy') or 0,
+                        'num_examples': update.get('num_examples') or 0,
                         'has_model': update.get('storage_path') is not None,
                         'ready_for_aggregation': update.get('storage_path') is not None
                     }
@@ -1810,8 +1858,8 @@ def get_aggregation_status():
         # Get recent round metrics for history
         round_metrics = sb().table('fl_round_metrics').select('*').order('round', desc=True).limit(10).execute()
         
-        # Calculate total samples from lab statuses
-        total_samples = sum(lab.get('num_examples', 0) for lab in lab_status.values())
+        # Calculate total samples from lab statuses (handle None values)
+        total_samples = sum((lab.get('num_examples') or 0) for lab in lab_status.values())
         num_labs_with_models = sum(1 for lab in lab_status.values() if lab['has_model'])
         
         return jsonify({
@@ -1829,6 +1877,8 @@ def get_aggregation_status():
         })
     except Exception as e:
         print(f"Error in get_aggregation_status: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
@@ -2227,15 +2277,15 @@ def get_round_history():
         rounds = []
         if round_metrics.data:
             for metric in round_metrics.data:
-                round_num = metric.get('round', 0)
+                round_num = metric.get('round') or 0
                 
                 # Find corresponding global model
                 global_model = next((gm for gm in global_models.data if gm['version'] == round_num), None) if global_models.data else None
                 
-                # Count labs that participated in this round
-                round_updates = [u for u in (client_updates.data or []) if u.get('round') == round_num]
+                # Count labs that participated in this round (handle None round values)
+                round_updates = [u for u in (client_updates.data or []) if (u.get('round') or 0) == round_num]
                 participating_labs = len(set(u.get('client_label') for u in round_updates))
-                total_samples = sum(u.get('num_examples', 0) for u in round_updates)
+                total_samples = sum((u.get('num_examples') or 0) for u in round_updates)
                 
                 rounds.append({
                     'round': round_num,
@@ -3228,6 +3278,765 @@ def get_test_dataset_info():
     except Exception as e:
         print(f"Error in get_test_dataset_info: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Patient Endpoints - Broadcasted Labs
+# ============================================================================
+
+@app.get("/patient/labs")
+def get_patient_labs():
+    """
+    Get list of broadcasted (registered) labs with their current accuracy.
+    
+    For patients to see available labs and choose one.
+    Returns labs sorted by accuracy (highest first).
+    
+    Response: Array of {
+        lab_id: string,
+        display_name: string,
+        accuracy: number (0.0 to 1.0),
+        accuracy_percent: string (e.g., "72.5%"),
+        last_updated: string (ISO timestamp),
+        num_patients: number (samples used for training)
+    }
+    """
+    try:
+        # Get all labs' latest updates from fl_client_updates
+        client_updates = sb().table('fl_client_updates').select('*').order('created_at', desc=True).execute()
+        
+        if not client_updates.data:
+            return jsonify({
+                'labs': [],
+                'message': 'No labs are registered yet. Check back later.'
+            })
+        
+        # Group by lab to get latest update per lab
+        lab_data = {}
+        for update in client_updates.data:
+            lab = update.get('client_label', 'unknown')
+            if lab not in lab_data:
+                # Get node accuracy (same as used elsewhere)
+                accuracy = get_lab_node_accuracy(lab)
+                if accuracy is None:
+                    accuracy = update.get('local_accuracy', 0)
+                
+                lab_data[lab] = {
+                    'lab_id': lab,
+                    'display_name': lab.replace('_', ' ').title(),  # lab_A -> "Lab A"
+                    'accuracy': accuracy if accuracy else 0,
+                    'accuracy_percent': f"{(accuracy or 0) * 100:.1f}%",
+                    'last_updated': update.get('created_at'),
+                    'num_patients': update.get('num_examples', 0)
+                }
+        
+        # Sort by accuracy descending (highest first)
+        labs_list = sorted(lab_data.values(), key=lambda x: x['accuracy'], reverse=True)
+        
+        return jsonify({
+            'labs': labs_list,
+            'total_labs': len(labs_list)
+        })
+        
+    except Exception as e:
+        print(f"Error in get_patient_labs: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/patient/select_lab")
+def select_patient_lab():
+    """
+    Save the patient's selected/preferred lab.
+    
+    Request body: { patient_id: string, lab_id: string }
+    
+    Stores the selection in patient_lab_selections table or updates patient profile.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        patient_id = body.get('patient_id')
+        lab_id = body.get('lab_id')
+        
+        if not patient_id:
+            return jsonify({'error': 'patient_id is required'}), 400
+        if not lab_id:
+            return jsonify({'error': 'lab_id is required'}), 400
+        
+        # Normalize lab_id
+        lab_id = normalize_lab_label(lab_id)
+        
+        # Verify the lab exists
+        lab_check = sb().table('fl_client_updates').select('client_label').eq('client_label', lab_id).limit(1).execute()
+        if not lab_check.data:
+            return jsonify({'error': f'Lab {lab_id} not found'}), 404
+        
+        # Try to upsert to patient_lab_selections table
+        # If table doesn't exist, we'll store in user metadata via Supabase auth
+        try:
+            sb().table('patient_lab_selections').upsert({
+                'patient_id': patient_id,
+                'lab_id': lab_id,
+                'selected_at': time.strftime('%Y-%m-%dT%H:%M:%SZ')
+            }, on_conflict='patient_id').execute()
+            
+            print(f"Patient {patient_id} selected lab {lab_id}")
+            
+        except Exception as table_error:
+            # Table might not exist - just log and continue
+            # The frontend can store in localStorage as fallback
+            print(f"Could not save to patient_lab_selections: {table_error}")
+            # Don't fail - let the frontend handle storage
+        
+        # Get lab details to return
+        accuracy = get_lab_node_accuracy(lab_id)
+        
+        return jsonify({
+            'success': True,
+            'selected_lab': {
+                'lab_id': lab_id,
+                'display_name': lab_id.replace('_', ' ').title(),
+                'accuracy': accuracy,
+                'accuracy_percent': f"{(accuracy or 0) * 100:.1f}%"
+            },
+            'message': f'Successfully selected {lab_id.replace("_", " ").title()}'
+        })
+        
+    except Exception as e:
+        print(f"Error in select_patient_lab: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/patient/selected_lab")
+def get_patient_selected_lab():
+    """
+    Get the patient's currently selected lab.
+    
+    Query params: patient_id (required)
+    
+    Returns the selected lab details or null if none selected.
+    """
+    try:
+        patient_id = request.args.get('patient_id')
+        
+        if not patient_id:
+            return jsonify({'error': 'patient_id is required'}), 400
+        
+        # Try to get from patient_lab_selections table
+        try:
+            selection = sb().table('patient_lab_selections').select('*').eq('patient_id', patient_id).limit(1).execute()
+            
+            if selection.data and len(selection.data) > 0:
+                lab_id = selection.data[0].get('lab_id')
+                accuracy = get_lab_node_accuracy(lab_id)
+                
+                return jsonify({
+                    'has_selection': True,
+                    'selected_lab': {
+                        'lab_id': lab_id,
+                        'display_name': lab_id.replace('_', ' ').title(),
+                        'accuracy': accuracy,
+                        'accuracy_percent': f"{(accuracy or 0) * 100:.1f}%",
+                        'selected_at': selection.data[0].get('selected_at')
+                    }
+                })
+        except Exception as table_error:
+            # Table might not exist
+            print(f"Could not query patient_lab_selections: {table_error}")
+        
+        return jsonify({
+            'has_selection': False,
+            'selected_lab': None
+        })
+        
+    except Exception as e:
+        print(f"Error in get_patient_selected_lab: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# Doctor Feedback Endpoints (Closed-Loop Feedback System)
+# ============================================================================
+
+DIAGNOSIS_LABELS = {
+    0: 'healthy',
+    1: 'diabetes',
+    2: 'hypertension',
+    3: 'heart_disease'
+}
+
+DIAGNOSIS_FROM_LABEL = {v: k for k, v in DIAGNOSIS_LABELS.items()}
+
+
+@app.get("/admin/reports")
+def get_admin_reports():
+    """
+    Get list of patient records (reports) for admin review.
+    
+    Query params:
+      - limit (int, default 50): max records to return
+      - offset (int, default 0): pagination offset
+      - lab_label (str, optional): filter by lab
+      - status (str, optional): 'pending', 'reviewed', 'all' (default 'all')
+    
+    Returns list of reports with feedback status.
+    """
+    try:
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+        lab_filter = request.args.get('lab_label')
+        status_filter = request.args.get('status', 'all')
+        
+        # Query patient_records
+        query = sb().table('patient_records').select(
+            'id, patient_id, lab_label, diagnosis, diagnosis_label, confidence, '
+            'probabilities, created_at, age, sex'
+        ).order('created_at', desc=True).range(offset, offset + limit - 1)
+        
+        if lab_filter:
+            query = query.eq('lab_label', normalize_lab_label(lab_filter))
+        
+        result = query.execute()
+        records = result.data or []
+        
+        # Get feedback for these records to determine status
+        record_ids = [r['id'] for r in records]
+        feedback_map = {}
+        
+        if record_ids:
+            try:
+                feedback_result = sb().table('doctor_feedback').select(
+                    'record_id, agree, correct_diagnosis, reviewer_name, created_at'
+                ).in_('record_id', record_ids).execute()
+                
+                for fb in (feedback_result.data or []):
+                    feedback_map[fb['record_id']] = fb
+            except Exception as fb_err:
+                print(f"Could not fetch feedback: {fb_err}")
+        
+        # Build response with status
+        reports = []
+        for rec in records:
+            has_feedback = rec['id'] in feedback_map
+            fb = feedback_map.get(rec['id'])
+            
+            # Apply status filter
+            if status_filter == 'pending' and has_feedback:
+                continue
+            if status_filter == 'reviewed' and not has_feedback:
+                continue
+            
+            reports.append({
+                'id': rec['id'],
+                'patient_id': rec.get('patient_id', 'Unknown'),
+                'lab_label': rec.get('lab_label', 'Unknown'),
+                'diagnosis': rec.get('diagnosis'),
+                'diagnosis_label': rec.get('diagnosis_label', 'Unknown'),
+                'confidence': rec.get('confidence'),
+                'probabilities': rec.get('probabilities'),
+                'created_at': rec.get('created_at'),
+                'age': rec.get('age'),
+                'sex': rec.get('sex'),
+                'status': 'reviewed' if has_feedback else 'pending',
+                'feedback': {
+                    'agree': fb.get('agree'),
+                    'correct_diagnosis': fb.get('correct_diagnosis'),
+                    'reviewer_name': fb.get('reviewer_name'),
+                    'reviewed_at': fb.get('created_at')
+                } if fb else None
+            })
+        
+        # Get total count
+        try:
+            count_query = sb().table('patient_records').select('id', count='exact')
+            if lab_filter:
+                count_query = count_query.eq('lab_label', normalize_lab_label(lab_filter))
+            count_result = count_query.execute()
+            total = count_result.count or len(records)
+        except:
+            total = len(records)
+        
+        return jsonify({
+            'reports': reports,
+            'total': total,
+            'limit': limit,
+            'offset': offset
+        })
+        
+    except Exception as e:
+        print(f"Error in get_admin_reports: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/reports/<record_id>")
+def get_admin_report_by_id(record_id):
+    """
+    Get a single patient record (report) by ID for evaluation.
+    
+    Returns full record details including any existing feedback.
+    """
+    try:
+        # Fetch the record
+        result = sb().table('patient_records').select('*').eq('id', record_id).limit(1).execute()
+        
+        if not result.data or len(result.data) == 0:
+            return jsonify({'error': 'Report not found'}), 404
+        
+        record = result.data[0]
+        
+        # Fetch existing feedback if any
+        feedback = None
+        try:
+            fb_result = sb().table('doctor_feedback').select('*').eq('record_id', record_id).limit(1).execute()
+            if fb_result.data and len(fb_result.data) > 0:
+                feedback = fb_result.data[0]
+        except Exception as fb_err:
+            print(f"Could not fetch feedback: {fb_err}")
+        
+        return jsonify({
+            'report': {
+                'id': record['id'],
+                'patient_id': record.get('patient_id', 'Unknown'),
+                'lab_label': record.get('lab_label', 'Unknown'),
+                'diagnosis': record.get('diagnosis'),
+                'diagnosis_label': record.get('diagnosis_label', 'Unknown'),
+                'confidence': record.get('confidence'),
+                'probabilities': record.get('probabilities'),
+                'created_at': record.get('created_at'),
+                # Demographics
+                'age': record.get('age'),
+                'sex': record.get('sex'),
+                'height_cm': record.get('height_cm'),
+                'weight_kg': record.get('weight_kg'),
+                'bmi': record.get('bmi'),
+                # Vitals
+                'systolic_bp': record.get('systolic_bp'),
+                'diastolic_bp': record.get('diastolic_bp'),
+                'heart_rate': record.get('heart_rate'),
+                # Blood chemistry
+                'fasting_glucose': record.get('fasting_glucose'),
+                'hba1c': record.get('hba1c'),
+                'total_cholesterol': record.get('total_cholesterol'),
+                'ldl_cholesterol': record.get('ldl_cholesterol'),
+                'hdl_cholesterol': record.get('hdl_cholesterol'),
+                'triglycerides': record.get('triglycerides'),
+            },
+            'feedback': {
+                'id': feedback.get('id'),
+                'agree': feedback.get('agree'),
+                'correct_diagnosis': feedback.get('correct_diagnosis'),
+                'correct_diagnosis_label': feedback.get('correct_diagnosis_label'),
+                'remarks': feedback.get('remarks'),
+                'reviewer_id': feedback.get('reviewer_id'),
+                'reviewer_name': feedback.get('reviewer_name'),
+                'created_at': feedback.get('created_at'),
+                'updated_at': feedback.get('updated_at')
+            } if feedback else None,
+            'status': 'reviewed' if feedback else 'pending'
+        })
+        
+    except Exception as e:
+        print(f"Error in get_admin_report_by_id: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/admin/reports/<record_id>/feedback")
+def submit_report_feedback(record_id):
+    """
+    Submit doctor feedback on a patient record's AI prediction.
+    
+    Body (JSON):
+      - agree (bool, required): true = agree with AI, false = disagree
+      - correct_diagnosis (int, optional): 0-3 if disagree, the correct diagnosis
+      - remarks (str, optional): additional comments
+      - reviewer_id (str, optional): reviewer identifier (default: 'admin')
+      - reviewer_name (str, optional): reviewer display name
+    
+    Uses upsert: one feedback per (record_id, reviewer_id), latest wins.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        
+        # Validate required fields
+        if 'agree' not in body:
+            return jsonify({'error': 'agree (boolean) is required'}), 400
+        
+        agree = bool(body['agree'])
+        correct_diagnosis = body.get('correct_diagnosis')
+        correct_diagnosis_label = None
+        remarks = body.get('remarks', '')
+        reviewer_id = body.get('reviewer_id', 'admin')
+        reviewer_name = body.get('reviewer_name', 'Admin')
+        reviewer_role = body.get('reviewer_role', 'central_admin')
+        
+        # If disagree and correct_diagnosis provided, validate it
+        if not agree and correct_diagnosis is not None:
+            if correct_diagnosis not in [0, 1, 2, 3]:
+                return jsonify({'error': 'correct_diagnosis must be 0, 1, 2, or 3'}), 400
+            correct_diagnosis_label = DIAGNOSIS_LABELS.get(correct_diagnosis)
+        
+        # Verify record exists
+        rec_check = sb().table('patient_records').select('id').eq('id', record_id).limit(1).execute()
+        if not rec_check.data or len(rec_check.data) == 0:
+            return jsonify({'error': 'Record not found'}), 404
+        
+        # Upsert feedback (insert or update if exists)
+        feedback_data = {
+            'record_id': record_id,
+            'reviewer_id': reviewer_id,
+            'reviewer_name': reviewer_name,
+            'reviewer_role': reviewer_role,
+            'agree': agree,
+            'correct_diagnosis': correct_diagnosis,
+            'correct_diagnosis_label': correct_diagnosis_label,
+            'remarks': remarks
+        }
+        
+        result = sb().table('doctor_feedback').upsert(
+            feedback_data,
+            on_conflict='record_id,reviewer_id'
+        ).execute()
+        
+        print(f"Feedback submitted for record {record_id}: agree={agree}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Feedback submitted successfully',
+            'feedback': result.data[0] if result.data else feedback_data
+        })
+        
+    except Exception as e:
+        print(f"Error in submit_report_feedback: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/admin/feedback_stats")
+def get_feedback_stats():
+    """
+    Get feedback statistics: overall and per-lab agreement rates.
+    
+    Query params:
+      - days (int, optional): limit to last N days (default: all time)
+    
+    Returns:
+      - overall: total, agreed, disagreed, agreement_rate
+      - per_lab: list of {lab_label, total, agreed, disagreed, agreement_rate}
+      - recent_trend: weekly breakdown if enough data
+    """
+    try:
+        days = request.args.get('days')
+        
+        # Build query - join feedback with patient_records to get lab_label
+        # Since Supabase doesn't support complex joins easily, we'll fetch both and join in Python
+        
+        # Fetch all feedback
+        fb_query = sb().table('doctor_feedback').select('*').order('created_at', desc=True)
+        fb_result = fb_query.execute()
+        all_feedback = fb_result.data or []
+        
+        # Apply days filter if specified
+        if days:
+            from datetime import datetime, timedelta
+            cutoff = datetime.utcnow() - timedelta(days=int(days))
+            cutoff_str = cutoff.isoformat()
+            all_feedback = [f for f in all_feedback if f.get('created_at', '') >= cutoff_str]
+        
+        if not all_feedback:
+            return jsonify({
+                'overall': {
+                    'total': 0,
+                    'agreed': 0,
+                    'disagreed': 0,
+                    'agreement_rate': 0.0,
+                    'agreement_percent': '0%'
+                },
+                'per_lab': [],
+                'recent_trend': []
+            })
+        
+        # Get record_ids to fetch lab_labels
+        record_ids = list(set(f['record_id'] for f in all_feedback))
+        
+        # Fetch patient_records for lab_label mapping
+        lab_map = {}
+        try:
+            if record_ids:
+                rec_result = sb().table('patient_records').select('id, lab_label').in_('id', record_ids).execute()
+                for rec in (rec_result.data or []):
+                    lab_map[rec['id']] = rec.get('lab_label', 'unknown')
+        except Exception as e:
+            print(f"Could not fetch lab labels: {e}")
+        
+        # Calculate overall stats
+        total = len(all_feedback)
+        agreed = sum(1 for f in all_feedback if f.get('agree'))
+        disagreed = total - agreed
+        agreement_rate = agreed / total if total > 0 else 0
+        
+        # Calculate per-lab stats
+        lab_stats = {}
+        for fb in all_feedback:
+            lab = lab_map.get(fb['record_id'], 'unknown')
+            if lab not in lab_stats:
+                lab_stats[lab] = {'total': 0, 'agreed': 0}
+            lab_stats[lab]['total'] += 1
+            if fb.get('agree'):
+                lab_stats[lab]['agreed'] += 1
+        
+        per_lab = []
+        for lab, stats in sorted(lab_stats.items(), key=lambda x: x[1]['total'], reverse=True):
+            per_lab.append({
+                'lab_label': lab,
+                'display_name': lab.replace('_', ' ').title(),
+                'total': stats['total'],
+                'agreed': stats['agreed'],
+                'disagreed': stats['total'] - stats['agreed'],
+                'agreement_rate': stats['agreed'] / stats['total'] if stats['total'] > 0 else 0,
+                'agreement_percent': f"{(stats['agreed'] / stats['total'] * 100):.1f}%" if stats['total'] > 0 else '0%'
+            })
+        
+        # Calculate weekly trend (last 4 weeks)
+        from datetime import datetime, timedelta
+        recent_trend = []
+        now = datetime.utcnow()
+        
+        for week_offset in range(4):
+            week_start = now - timedelta(weeks=week_offset + 1)
+            week_end = now - timedelta(weeks=week_offset)
+            
+            week_feedback = [
+                f for f in all_feedback
+                if week_start.isoformat() <= f.get('created_at', '') < week_end.isoformat()
+            ]
+            
+            week_total = len(week_feedback)
+            week_agreed = sum(1 for f in week_feedback if f.get('agree'))
+            
+            recent_trend.append({
+                'week': f"Week -{week_offset + 1}",
+                'start_date': week_start.strftime('%Y-%m-%d'),
+                'end_date': week_end.strftime('%Y-%m-%d'),
+                'total': week_total,
+                'agreed': week_agreed,
+                'agreement_rate': week_agreed / week_total if week_total > 0 else 0
+            })
+        
+        recent_trend.reverse()  # Oldest to newest
+        
+        return jsonify({
+            'overall': {
+                'total': total,
+                'agreed': agreed,
+                'disagreed': disagreed,
+                'agreement_rate': agreement_rate,
+                'agreement_percent': f"{agreement_rate * 100:.1f}%"
+            },
+            'per_lab': per_lab,
+            'recent_trend': recent_trend
+        })
+        
+    except Exception as e:
+        print(f"Error in get_feedback_stats: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/lab/feedback")
+def get_lab_feedback():
+    """
+    Get feedback on reports created by a specific lab.
+    
+    Query params:
+      - lab_label (str, required): the lab identifier
+      - limit (int, default 50): max records
+    
+    Returns list of feedback for this lab's patient records.
+    """
+    try:
+        lab_label = request.args.get('lab_label')
+        limit = int(request.args.get('limit', 50))
+        
+        if not lab_label:
+            return jsonify({'error': 'lab_label is required'}), 400
+        
+        lab_label = normalize_lab_label(lab_label)
+        
+        # Get patient_records for this lab
+        rec_result = sb().table('patient_records').select(
+            'id, patient_id, diagnosis, diagnosis_label, confidence, created_at'
+        ).eq('lab_label', lab_label).order('created_at', desc=True).limit(limit).execute()
+        
+        records = rec_result.data or []
+        record_ids = [r['id'] for r in records]
+        
+        if not record_ids:
+            return jsonify({'feedback': [], 'total': 0})
+        
+        # Get feedback for these records
+        fb_result = sb().table('doctor_feedback').select('*').in_('record_id', record_ids).execute()
+        feedback_map = {fb['record_id']: fb for fb in (fb_result.data or [])}
+        
+        # Build response
+        feedback_list = []
+        for rec in records:
+            fb = feedback_map.get(rec['id'])
+            if fb:  # Only include records that have feedback
+                feedback_list.append({
+                    'record_id': rec['id'],
+                    'patient_id': rec.get('patient_id', 'Unknown'),
+                    'ai_diagnosis': rec.get('diagnosis'),
+                    'ai_diagnosis_label': rec.get('diagnosis_label'),
+                    'ai_confidence': rec.get('confidence'),
+                    'record_created_at': rec.get('created_at'),
+                    'feedback': {
+                        'agree': fb.get('agree'),
+                        'correct_diagnosis': fb.get('correct_diagnosis'),
+                        'correct_diagnosis_label': fb.get('correct_diagnosis_label'),
+                        'remarks': fb.get('remarks'),
+                        'reviewer_name': fb.get('reviewer_name'),
+                        'created_at': fb.get('created_at')
+                    }
+                })
+        
+        return jsonify({
+            'feedback': feedback_list,
+            'total': len(feedback_list),
+            'lab_label': lab_label
+        })
+        
+    except Exception as e:
+        print(f"Error in get_lab_feedback: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/lab/feedback")
+def submit_lab_feedback():
+    """
+    Allow lab to submit feedback on their own reports.
+    
+    Body (JSON):
+      - record_id (str, required): the patient record ID
+      - lab_label (str, required): must match the record's lab
+      - agree (bool, required): agree with AI prediction
+      - correct_diagnosis (int, optional): 0-3 if disagree
+      - remarks (str, optional): additional comments
+      - reviewer_id (str, optional): lab user identifier
+      - reviewer_name (str, optional): lab user name
+    
+    Only allows feedback on records belonging to this lab.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        
+        record_id = body.get('record_id')
+        lab_label = body.get('lab_label')
+        
+        if not record_id:
+            return jsonify({'error': 'record_id is required'}), 400
+        if not lab_label:
+            return jsonify({'error': 'lab_label is required'}), 400
+        if 'agree' not in body:
+            return jsonify({'error': 'agree (boolean) is required'}), 400
+        
+        lab_label = normalize_lab_label(lab_label)
+        
+        # Verify record exists and belongs to this lab
+        rec_check = sb().table('patient_records').select('id, lab_label').eq('id', record_id).limit(1).execute()
+        if not rec_check.data or len(rec_check.data) == 0:
+            return jsonify({'error': 'Record not found'}), 404
+        
+        record_lab = rec_check.data[0].get('lab_label')
+        if record_lab != lab_label:
+            return jsonify({'error': 'Record does not belong to this lab'}), 403
+        
+        # Prepare feedback
+        agree = bool(body['agree'])
+        correct_diagnosis = body.get('correct_diagnosis')
+        correct_diagnosis_label = None
+        
+        if not agree and correct_diagnosis is not None:
+            if correct_diagnosis not in [0, 1, 2, 3]:
+                return jsonify({'error': 'correct_diagnosis must be 0, 1, 2, or 3'}), 400
+            correct_diagnosis_label = DIAGNOSIS_LABELS.get(correct_diagnosis)
+        
+        reviewer_id = body.get('reviewer_id', f'lab_{lab_label}')
+        reviewer_name = body.get('reviewer_name', lab_label.replace('_', ' ').title())
+        
+        feedback_data = {
+            'record_id': record_id,
+            'reviewer_id': reviewer_id,
+            'reviewer_name': reviewer_name,
+            'reviewer_role': 'lab',
+            'agree': agree,
+            'correct_diagnosis': correct_diagnosis,
+            'correct_diagnosis_label': correct_diagnosis_label,
+            'remarks': body.get('remarks', '')
+        }
+        
+        result = sb().table('doctor_feedback').upsert(
+            feedback_data,
+            on_conflict='record_id,reviewer_id'
+        ).execute()
+        
+        print(f"Lab feedback submitted for record {record_id}: agree={agree}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Feedback submitted successfully',
+            'feedback': result.data[0] if result.data else feedback_data
+        })
+        
+    except Exception as e:
+        print(f"Error in submit_lab_feedback: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def get_lab_agreement_rate(lab_label: str) -> dict:
+    """
+    Helper function to get agreement rate for a specific lab.
+    Used in aggregation for reweighting.
+    
+    Returns: {'total': int, 'agreed': int, 'rate': float}
+    """
+    try:
+        lab_label = normalize_lab_label(lab_label)
+        
+        # Get record IDs for this lab
+        rec_result = sb().table('patient_records').select('id').eq('lab_label', lab_label).execute()
+        record_ids = [r['id'] for r in (rec_result.data or [])]
+        
+        if not record_ids:
+            return {'total': 0, 'agreed': 0, 'rate': 1.0}  # Default to 1.0 if no feedback
+        
+        # Get feedback for these records
+        fb_result = sb().table('doctor_feedback').select('agree').in_('record_id', record_ids).execute()
+        
+        total = len(fb_result.data or [])
+        agreed = sum(1 for f in (fb_result.data or []) if f.get('agree'))
+        
+        return {
+            'total': total,
+            'agreed': agreed,
+            'rate': agreed / total if total > 0 else 1.0  # Default to 1.0 if no feedback
+        }
+        
+    except Exception as e:
+        print(f"Error getting lab agreement rate: {e}")
+        return {'total': 0, 'agreed': 0, 'rate': 1.0}
 
 
 if __name__ == "__main__":

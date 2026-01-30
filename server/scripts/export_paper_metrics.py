@@ -1,5 +1,5 @@
 """
-Export MedSafe FL Paper Metrics
+Export PrivMed FL Paper Metrics
 
 Exports all collected federated learning metrics to CSV and JSON formats
 for paper analysis and visualization.
@@ -430,7 +430,7 @@ class PaperMetricsExporter:
             experiment_ids: List of experiment IDs to export (None for all)
         """
         print("=" * 60)
-        print("Exporting All MedSafe FL Paper Metrics")
+        print("Exporting All PrivMed FL Paper Metrics")
         print("=" * 60)
         
         # Export all tables
@@ -445,7 +445,7 @@ class PaperMetricsExporter:
         # Create README
         readme_path = self.output_dir / "README.md"
         with open(readme_path, 'w') as f:
-            f.write(f"""# MedSafe FL Paper Metrics Export
+            f.write(f"""# PrivMed FL Paper Metrics Export
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
@@ -533,7 +533,7 @@ Based on these exports, you can generate:
 def main():
     """Main export function."""
     parser = argparse.ArgumentParser(
-        description='Export MedSafe FL metrics for paper analysis'
+        description='Export PrivMed FL metrics for paper analysis'
     )
     parser.add_argument('--experiment-id', type=str, nargs='+',
                        help='Experiment ID(s) to export (default: all)')

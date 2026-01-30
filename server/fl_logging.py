@@ -4,7 +4,7 @@ Federated Learning Pipeline Logging Module
 Provides functions to log comprehensive FL metrics during training and aggregation.
 Integrates with app.py to store per-round, per-lab, and global metrics.
 
-Author: MedSafe Team
+Author: PrivMed Team
 """
 
 import json
