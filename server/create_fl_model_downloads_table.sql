@@ -17,6 +17,11 @@ CREATE TABLE public.fl_model_downloads (
     accuracy_before_download FLOAT,
     accuracy_after_download FLOAT,
     improvement FLOAT,
+    improvement_percentage FLOAT,
+    
+    -- Node accuracy: the lab's current model accuracy on shared test set
+    -- This is the single accuracy number for this lab after downloading global model
+    node_accuracy FLOAT,
     
     -- Prevent duplicate downloads from being tracked
     UNIQUE(lab_label, global_model_version)
@@ -34,4 +39,5 @@ CREATE POLICY "Service role has full access to fl_model_downloads" ON public.fl_
     FOR ALL USING (true) WITH CHECK (true);
 
 -- Add comment for documentation
-COMMENT ON TABLE public.fl_model_downloads IS 'Tracks which labs downloaded which global model versions and their performance improvements';
+COMMENT ON TABLE public.fl_model_downloads IS 'Tracks which labs downloaded which global model versions, their node accuracy, and performance improvements';
+COMMENT ON COLUMN public.fl_model_downloads.node_accuracy IS 'Lab node accuracy after downloading global model, evaluated on shared test set';

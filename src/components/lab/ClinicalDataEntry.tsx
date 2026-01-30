@@ -30,6 +30,15 @@ interface PredictionResult {
   };
 }
 
+interface ModelInfo {
+  current_model_type: 'global' | 'local' | 'baseline' | 'none';
+  current_model_version: number | null;
+  current_model_accuracy: number | null;
+  current_model_accuracy_percent: string | null;
+  last_updated: string | null;
+  has_model: boolean;
+}
+
 export default function ClinicalDataEntry() {
   const { user } = useAuth();
   const [serverUrl, setServerUrl] = useState('http://127.0.0.1:5001');
@@ -37,6 +46,8 @@ export default function ClinicalDataEntry() {
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [nodeAccuracy, setNodeAccuracy] = useState<number | null>(null);
+  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   
   // Generate unique patient ID
   const generatePatientId = () => {
@@ -105,6 +116,44 @@ export default function ClinicalDataEntry() {
   const hba1cStatus = useMemo(() => getHba1cStatus(hba1c), [hba1c]);
   const cholesterolStatus = useMemo(() => getCholesterolStatus(totalCholesterol), [totalCholesterol]);
   
+  // Fetch node accuracy on component mount
+  useEffect(() => {
+    const fetchModelInfo = async () => {
+      try {
+        const labLabel = user?.labName || 'Lab A';
+        const response = await fetch(`${serverUrl}/lab/get_current_model_info?lab_label=${encodeURIComponent(labLabel)}`);
+        if (response.ok) {
+          const data = await response.json();
+          setModelInfo(data);
+          if (data.current_model_accuracy !== null) {
+            setNodeAccuracy(data.current_model_accuracy);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching model info:', err);
+      }
+    };
+    fetchModelInfo();
+  }, [user, serverUrl]);
+  
+  // Function to refresh model info (call after prediction, download, etc.)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const refreshModelInfo = async () => {
+    try {
+      const labLabel = user?.labName || 'Lab A';
+      const response = await fetch(`${serverUrl}/lab/get_current_model_info?lab_label=${encodeURIComponent(labLabel)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setModelInfo(data);
+        if (data.current_model_accuracy !== null) {
+          setNodeAccuracy(data.current_model_accuracy);
+        }
+      }
+    } catch (err) {
+      console.error('Error refreshing model info:', err);
+    }
+  };
+  
   // Update max heart rate when age changes
   useEffect(() => {
     setMaxHeartRate(220 - age);
@@ -156,8 +205,8 @@ export default function ClinicalDataEntry() {
       on_diabetes_medication: (onMetformin || onInsulin || onSulfonylureas || onGlp1Agonists) ? 1 : 0,
       on_cholesterol_medication: onStatin ? 1 : 0,
       
-      // Lab info
-      lab_label: (user as any)?.user_metadata?.lab_label || 'lab_A',
+      // Lab info - use labName (e.g., "Lab A", "Lab B") which backend normalizes to lab_A, lab_B
+      lab_label: user?.labName || 'Lab A',
     };
   };
   
@@ -197,9 +246,15 @@ export default function ClinicalDataEntry() {
       };
       
       setResult(predictionResult);
+      
+      // Update node accuracy from response if provided
+      if (data.node_accuracy !== null && data.node_accuracy !== undefined) {
+        setNodeAccuracy(data.node_accuracy);
+      }
 
       // Backend /submit now persists to patient_records (Option B); no direct frontend insert.
-      setSuccessMessage('Prediction complete. Patient record saved by server.');
+      const modelSource = data.model_source || 'unknown';
+      setSuccessMessage(`Prediction complete using ${modelSource} model. Patient record saved.`);
       
     } catch (err) {
       console.error('Prediction error:', err);
@@ -417,7 +472,12 @@ export default function ClinicalDataEntry() {
       
       {/* Results Section */}
       <div className="mt-8">
-        <DiagnosisResult result={result} isLoading={isSubmitting} />
+        <DiagnosisResult 
+          result={result} 
+          isLoading={isSubmitting} 
+          nodeAccuracy={nodeAccuracy} 
+          modelInfo={modelInfo}
+        />
       </div>
     </div>
   );

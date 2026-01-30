@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Brain, Users, TrendingUp, Database, RefreshCw, Zap, CheckCircle, AlertCircle, Clock, Send } from 'lucide-react';
+import { Brain, Users, TrendingUp, Database, RefreshCw, Zap, CheckCircle, AlertCircle, Clock, Send, BarChart3 } from 'lucide-react';
 import PushModelModal from './PushModelModal';
 import BroadcastHistory from './BroadcastHistory';
 
@@ -41,6 +41,12 @@ interface AggregationStatus {
   ready_labs: number;
 }
 
+interface RoundMetric {
+  round: number;
+  global_accuracy: number;
+  created_at: string;
+}
+
 export default function ModelAggregation() {
   const [serverUrl, setServerUrl] = useState<string>('http://127.0.0.1:5001');
   const [isAggregating, setIsAggregating] = useState(false);
@@ -49,6 +55,20 @@ export default function ModelAggregation() {
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const [showPushModal, setShowPushModal] = useState(false);
+  const [roundMetrics, setRoundMetrics] = useState<RoundMetric[]>([]);
+
+  // Load round metrics (accuracy over rounds)
+  const loadRoundMetrics = async () => {
+    try {
+      const resp = await fetch(`${serverUrl}/admin/round_metrics`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setRoundMetrics(data.metrics || []);
+      }
+    } catch (error) {
+      console.error('Error loading round metrics:', error);
+    }
+  };
 
   // Load aggregation status
   const loadStatus = async () => {
@@ -65,8 +85,12 @@ export default function ModelAggregation() {
 
   useEffect(() => {
     loadStatus();
+    loadRoundMetrics();
     // Refresh status every 10 seconds
-    const interval = setInterval(loadStatus, 10000);
+    const interval = setInterval(() => {
+      loadStatus();
+      loadRoundMetrics();
+    }, 10000);
     return () => clearInterval(interval);
   }, [serverUrl]);
 
@@ -91,8 +115,11 @@ export default function ModelAggregation() {
       setLastResult(data);
       setSuccess(`Successfully created global model v${data.modelVersion}!`);
       
-      // Refresh status
-      setTimeout(loadStatus, 1000);
+      // Refresh status and metrics
+      setTimeout(() => {
+        loadStatus();
+        loadRoundMetrics();
+      }, 1000);
       
     } catch (err: any) {
       setError(err.message || 'Failed to aggregate models');
@@ -360,6 +387,105 @@ export default function ModelAggregation() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Accuracy Over Rounds - Visual Timeline */}
+      {roundMetrics.length > 0 && (
+        <div className="card p-6">
+          <h3 className="text-base font-semibold text-neutral-900 mb-4 flex items-center">
+            <BarChart3 className="w-4 h-4 mr-2 text-primary-500" />
+            Accuracy Over Aggregation Rounds
+          </h3>
+          
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-neutral-200">
+              <thead className="bg-neutral-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Round</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Global Accuracy</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Change</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Trend</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-neutral-200">
+                {roundMetrics.map((metric, index) => {
+                  const prevMetric = index < roundMetrics.length - 1 ? roundMetrics[index + 1] : null;
+                  const change = prevMetric && metric.global_accuracy && prevMetric.global_accuracy
+                    ? ((metric.global_accuracy - prevMetric.global_accuracy) * 100).toFixed(2)
+                    : null;
+                  const isPositive = change !== null && parseFloat(change) > 0;
+                  const isNegative = change !== null && parseFloat(change) < 0;
+                  
+                  return (
+                    <tr key={metric.round} className="hover:bg-neutral-50">
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                          v{metric.round}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-sm font-semibold text-neutral-900">
+                          {metric.global_accuracy 
+                            ? `${(metric.global_accuracy * 100).toFixed(2)}%`
+                            : 'N/A'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {change !== null ? (
+                          <span className={`text-sm font-medium ${
+                            isPositive ? 'text-success-600' : isNegative ? 'text-error-600' : 'text-neutral-500'
+                          }`}>
+                            {isPositive ? '+' : ''}{change}%
+                          </span>
+                        ) : (
+                          <span className="text-sm text-neutral-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-neutral-500">
+                        {new Date(metric.created_at).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {isPositive ? (
+                          <TrendingUp className="w-4 h-4 text-success-500" />
+                        ) : isNegative ? (
+                          <TrendingUp className="w-4 h-4 text-error-500 transform rotate-180" />
+                        ) : (
+                          <span className="w-4 h-4 inline-block text-center text-neutral-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          {/* Simple visual accuracy bar chart */}
+          <div className="mt-6">
+            <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Accuracy Trend</h4>
+            <div className="flex items-end gap-2 h-24">
+              {roundMetrics.slice().reverse().map((metric) => {
+                const height = metric.global_accuracy ? metric.global_accuracy * 100 : 0;
+                return (
+                  <div key={metric.round} className="flex flex-col items-center flex-1 max-w-16">
+                    <div 
+                      className="w-full bg-primary-500 rounded-t transition-all duration-300"
+                      style={{ height: `${height}%` }}
+                      title={`v${metric.round}: ${height.toFixed(1)}%`}
+                    />
+                    <span className="text-xs text-neutral-500 mt-1">v{metric.round}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
