@@ -7,15 +7,16 @@ import CardiacMarkers from './CardiacMarkers';
 import MedicalHistory from './MedicalHistory';
 import CurrentMedications from './CurrentMedications';
 import DiagnosisResult from './DiagnosisResult';
-import { 
-  calculateBmi, 
-  getBmiStatus, 
-  getBpStatus, 
+import {
+  calculateBmi,
+  getBmiStatus,
+  getBpStatus,
   getGlucoseStatus,
   getHba1cStatus,
   getCholesterolStatus,
-  getHeartRateStatus 
+  getHeartRateStatus
 } from './ReferenceRanges';
+import { encryptPatientDataCKKS } from '../../utils/ckks';
 import '../../styles/clinical.css';
 
 interface PredictionResult {
@@ -48,35 +49,35 @@ export default function ClinicalDataEntry() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [nodeAccuracy, setNodeAccuracy] = useState<number | null>(null);
   const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
-  
+
   // Generate unique patient ID
   const generatePatientId = () => {
     return 'P-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 5).toUpperCase();
   };
-  
+
   // Patient Registration
   const [patientId] = useState(generatePatientId());
   const [age, setAge] = useState(50);
   const [sex, setSex] = useState('M');
   const [heightCm, setHeightCm] = useState(0);
   const [weightKg, setWeightKg] = useState(0);
-  
+
   // Vital Signs
   const [systolicBp, setSystolicBp] = useState(120);
   const [diastolicBp, setDiastolicBp] = useState(80);
   const [heartRate, setHeartRate] = useState(72);
-  
+
   // Blood Chemistry - Glucose
   const [fastingGlucose, setFastingGlucose] = useState(100);
   const [hba1c, setHba1c] = useState(5.5);
   const [insulin, setInsulin] = useState(0);
-  
+
   // Blood Chemistry - Lipid Panel
   const [totalCholesterol, setTotalCholesterol] = useState(200);
   const [ldlCholesterol, setLdlCholesterol] = useState(100);
   const [hdlCholesterol, setHdlCholesterol] = useState(50);
   const [triglycerides, setTriglycerides] = useState(150);
-  
+
   // Cardiac Markers
   const [chestPainType, setChestPainType] = useState(4);
   const [restingEcg, setRestingEcg] = useState(0);
@@ -84,7 +85,7 @@ export default function ClinicalDataEntry() {
   const [exerciseAngina, setExerciseAngina] = useState(0);
   const [stDepression, setStDepression] = useState(0);
   const [stSlope, setStSlope] = useState(2);
-  
+
   // Medical History
   const [smokingStatus, setSmokingStatus] = useState(0);
   const [familyHistoryCvd, setFamilyHistoryCvd] = useState(false);
@@ -94,7 +95,7 @@ export default function ClinicalDataEntry() {
   const [priorHypertension, setPriorHypertension] = useState(false);
   const [priorHeartDisease, setPriorHeartDisease] = useState(false);
   const [priorStroke, setPriorStroke] = useState(false);
-  
+
   // Medications
   const [onMetformin, setOnMetformin] = useState(false);
   const [onInsulin, setOnInsulin] = useState(false);
@@ -106,7 +107,7 @@ export default function ClinicalDataEntry() {
   const [onDiuretic, setOnDiuretic] = useState(false);
   const [onStatin, setOnStatin] = useState(false);
   const [onAspirin, setOnAspirin] = useState(false);
-  
+
   // Computed values
   const bmi = useMemo(() => calculateBmi(heightCm, weightKg), [heightCm, weightKg]);
   const bmiStatus = useMemo(() => getBmiStatus(bmi), [bmi]);
@@ -115,7 +116,7 @@ export default function ClinicalDataEntry() {
   const glucoseStatus = useMemo(() => getGlucoseStatus(fastingGlucose), [fastingGlucose]);
   const hba1cStatus = useMemo(() => getHba1cStatus(hba1c), [hba1c]);
   const cholesterolStatus = useMemo(() => getCholesterolStatus(totalCholesterol), [totalCholesterol]);
-  
+
   // Fetch node accuracy on component mount
   useEffect(() => {
     const fetchModelInfo = async () => {
@@ -135,7 +136,7 @@ export default function ClinicalDataEntry() {
     };
     fetchModelInfo();
   }, [user, serverUrl]);
-  
+
   // Function to refresh model info (call after prediction, download, etc.)
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const refreshModelInfo = async () => {
@@ -153,12 +154,12 @@ export default function ClinicalDataEntry() {
       console.error('Error refreshing model info:', err);
     }
   };
-  
+
   // Update max heart rate when age changes
   useEffect(() => {
     setMaxHeartRate(220 - age);
   }, [age]);
-  
+
   // Build patient data payload
   const buildPatientData = () => {
     return {
@@ -169,12 +170,12 @@ export default function ClinicalDataEntry() {
       height_cm: heightCm || null,
       weight_kg: weightKg || null,
       bmi: bmi > 0 ? bmi : null,
-      
+
       // Vital Signs
       systolic_bp: systolicBp,
       diastolic_bp: diastolicBp,
       heart_rate: heartRate,
-      
+
       // Blood Chemistry
       fasting_glucose: fastingGlucose,
       hba1c,
@@ -183,7 +184,7 @@ export default function ClinicalDataEntry() {
       ldl_cholesterol: ldlCholesterol,
       hdl_cholesterol: hdlCholesterol,
       triglycerides,
-      
+
       // Cardiac Markers
       chest_pain_type: chestPainType,
       resting_ecg: restingEcg,
@@ -191,7 +192,7 @@ export default function ClinicalDataEntry() {
       exercise_angina: exerciseAngina,
       st_depression: stDepression,
       st_slope: stSlope,
-      
+
       // Medical History
       smoking_status: smokingStatus,
       family_history_cvd: familyHistoryCvd ? 1 : 0,
@@ -199,25 +200,28 @@ export default function ClinicalDataEntry() {
       prior_hypertension: priorHypertension ? 1 : 0,
       prior_diabetes: priorDiabetes ? 1 : 0,
       prior_heart_disease: priorHeartDisease ? 1 : 0,
-      
+
       // Medications (aggregated)
       on_bp_medication: (onAceInhibitor || onBetaBlocker || onCalciumChannelBlocker || onDiuretic) ? 1 : 0,
       on_diabetes_medication: (onMetformin || onInsulin || onSulfonylureas || onGlp1Agonists) ? 1 : 0,
       on_cholesterol_medication: onStatin ? 1 : 0,
-      
+
       // Lab info - use labName (e.g., "Lab A", "Lab B") which backend normalizes to lab_A, lab_B
       lab_label: user?.labName || 'Lab A',
     };
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     setError(null);
     setSuccessMessage(null);
-    
+
     const patientData = buildPatientData();
-    
+
+    // Demonstrate CKKS encryption (as requested: print to console, don't store)
+    encryptPatientDataCKKS(patientData).catch(err => console.error('CKKS Encryption error:', err));
+
     try {
       // Send to backend for prediction
       const response = await fetch(`${serverUrl}/submit`, {
@@ -225,13 +229,13 @@ export default function ClinicalDataEntry() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patientData),
       });
-      
+
       if (!response.ok) {
         throw new Error(`Server error: ${response.status}`);
       }
-      
+
       const data = await response.json();
-      
+
       // Transform response to match expected format
       const predictionResult: PredictionResult = {
         diagnosis: data.diagnosis ?? 0,
@@ -244,9 +248,9 @@ export default function ClinicalDataEntry() {
           heart_disease: data.disease_type === 'heart_disease' ? data.risk_score : 0.25,
         },
       };
-      
+
       setResult(predictionResult);
-      
+
       // Update node accuracy from response if provided
       if (data.node_accuracy !== null && data.node_accuracy !== undefined) {
         setNodeAccuracy(data.node_accuracy);
@@ -255,7 +259,7 @@ export default function ClinicalDataEntry() {
       // Backend /submit now persists to patient_records (Option B); no direct frontend insert.
       const modelSource = data.model_source || 'unknown';
       setSuccessMessage(`Prediction complete using ${modelSource} model. Patient record saved.`);
-      
+
     } catch (err) {
       console.error('Prediction error:', err);
       setError(err instanceof Error ? err.message : 'Failed to get prediction');
@@ -263,7 +267,7 @@ export default function ClinicalDataEntry() {
       setIsSubmitting(false);
     }
   };
-  
+
   const resetForm = () => {
     setAge(50);
     setSex('M');
@@ -307,7 +311,7 @@ export default function ClinicalDataEntry() {
     setError(null);
     setSuccessMessage(null);
   };
-  
+
   return (
     <div className="clinical-data-entry">
       <div className="mb-6 flex justify-between items-center">
@@ -325,19 +329,19 @@ export default function ClinicalDataEntry() {
           />
         </div>
       </div>
-      
+
       {error && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
           <strong>Error:</strong> {error}
         </div>
       )}
-      
+
       {successMessage && (
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg text-green-700">
           {successMessage}
         </div>
       )}
-      
+
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left Column */}
@@ -355,7 +359,7 @@ export default function ClinicalDataEntry() {
               bmi={bmi}
               bmiStatus={bmiStatus}
             />
-            
+
             <VitalSigns
               systolicBp={systolicBp}
               setSystolicBp={setSystolicBp}
@@ -366,7 +370,7 @@ export default function ClinicalDataEntry() {
               bpStatus={bpStatus}
               hrStatus={hrStatus}
             />
-            
+
             <BloodChemistry
               fastingGlucose={fastingGlucose}
               setFastingGlucose={setFastingGlucose}
@@ -388,7 +392,7 @@ export default function ClinicalDataEntry() {
               sex={sex}
             />
           </div>
-          
+
           {/* Right Column */}
           <div className="space-y-6">
             <CardiacMarkers
@@ -406,7 +410,7 @@ export default function ClinicalDataEntry() {
               stSlope={stSlope}
               setStSlope={setStSlope}
             />
-            
+
             <MedicalHistory
               smokingStatus={smokingStatus}
               setSmokingStatus={setSmokingStatus}
@@ -425,7 +429,7 @@ export default function ClinicalDataEntry() {
               priorStroke={priorStroke}
               setPriorStroke={setPriorStroke}
             />
-            
+
             <CurrentMedications
               onMetformin={onMetformin}
               setOnMetformin={setOnMetformin}
@@ -450,7 +454,7 @@ export default function ClinicalDataEntry() {
             />
           </div>
         </div>
-        
+
         {/* Submit buttons */}
         <div className="mt-6 flex gap-4">
           <button
@@ -469,13 +473,13 @@ export default function ClinicalDataEntry() {
           </button>
         </div>
       </form>
-      
+
       {/* Results Section */}
       <div className="mt-8">
-        <DiagnosisResult 
-          result={result} 
-          isLoading={isSubmitting} 
-          nodeAccuracy={nodeAccuracy} 
+        <DiagnosisResult
+          result={result}
+          isLoading={isSubmitting}
+          nodeAccuracy={nodeAccuracy}
           modelInfo={modelInfo}
         />
       </div>
