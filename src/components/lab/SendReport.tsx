@@ -50,7 +50,7 @@ export default function SendReport() {
   return (
     <div className="max-w-2xl">
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold text-gray-900 mb-6">Encrypt & Send Report to Central Lab</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-6">Send Report to Central Lab</h2>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -112,14 +112,14 @@ export default function SendReport() {
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-800">
-              Report data will be encrypted using homomorphic encryption before transmission to the central lab, preserving patient privacy.
+              Report files use standard encryption at rest and TLS in transit. Homomorphic encryption is reserved for structured numerical clinical fields only.
             </p>
           </div>
 
           {sendSuccess && (
             <div className="flex items-center p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
               <CheckCircle className="w-5 h-5 mr-2" />
-              <span className="text-sm font-medium">Report encrypted and sent to central lab successfully!</span>
+              <span className="text-sm font-medium">Report sent securely to central lab.</span>
             </div>
           )}
 
@@ -128,7 +128,7 @@ export default function SendReport() {
             disabled={!file || isSending}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
           >
-            {isSending ? 'Encrypting & Sending...' : 'Encrypt & Send to Central Lab'}
+            {isSending ? 'Sending Securely...' : 'Send To Central Lab'}
           </button>
         </form>
       </div>

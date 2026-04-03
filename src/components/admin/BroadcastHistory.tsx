@@ -112,7 +112,7 @@ export default function BroadcastHistory({ serverUrl }: BroadcastHistoryProps) {
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-bold text-gray-900 flex items-center">
           <History className="w-5 h-5 mr-2 text-blue-600" />
-          Model Broadcast History
+          Global Weight Distribution History
         </h3>
         <button
           onClick={loadHistory}
@@ -125,8 +125,8 @@ export default function BroadcastHistory({ serverUrl }: BroadcastHistoryProps) {
       {broadcasts.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
           <History className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-          <p>No model broadcasts yet</p>
-          <p className="text-sm mt-1">Push your first global model to see history here</p>
+          <p>No global weight distributions yet</p>
+          <p className="text-sm mt-1">Distribute your first global weights to see history here</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -149,7 +149,7 @@ export default function BroadcastHistory({ serverUrl }: BroadcastHistoryProps) {
                   <div>
                     <div className="flex items-center space-x-2">
                       <span className="font-medium text-gray-900">
-                        Global Model v{broadcast.global_model_version}
+                        Global Weights v{broadcast.global_model_version}
                       </span>
                       {getStatusBadge(broadcast.status)}
                     </div>

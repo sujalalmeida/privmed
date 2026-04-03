@@ -9,8 +9,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.preprocessing import StandardScaler
 
-# Use Gradient Boosting for better performance (you can switch to RandomForest if needed)
-MODEL_TYPE = 'gradient_boosting'  # Options: 'logistic', 'random_forest', 'gradient_boosting'
+# FL training uses a linear model so local "epochs" and exact FedAvg on weights are
+# both well-defined. Baseline and older saved models can still be loaded elsewhere.
+MODEL_TYPE = 'logistic'  # Options: 'logistic', 'random_forest', 'gradient_boosting'
 
 # Disease types: 0=healthy, 1=diabetes, 2=hypertension, 3=heart_disease
 DISEASE_TYPES = ['healthy', 'diabetes', 'hypertension', 'heart_disease']
@@ -238,6 +239,32 @@ def model_path_for_lab(lab_label: str) -> str:
     return os.path.join(base, f'{lab_label}.pkl')
 
 
+def is_supported_fl_model(model) -> bool:
+    """FedAvg + CKKS in this project only supports linear sklearn models."""
+    return (
+        isinstance(model, LogisticRegression)
+        and hasattr(model, 'coef_')
+        and getattr(model, 'coef_', None) is not None
+        and hasattr(model, 'intercept_')
+        and getattr(model, 'intercept_', None) is not None
+    )
+
+
+def create_fl_logistic_model(n_features: int):
+    """Create the linear model used by the FL round logic."""
+    model = LogisticRegression(
+        max_iter=1,
+        warm_start=True,
+        solver='lbfgs',
+        random_state=42,
+    )
+    model.coef_ = np.zeros((4, n_features))
+    model.intercept_ = np.zeros((4,))
+    model.classes_ = np.array([0, 1, 2, 3])
+    model.n_features_in_ = int(n_features)
+    return model
+
+
 def load_or_init_model(lab_label: str, n_features: int):
     """
     Load existing model with priority:
@@ -257,21 +284,29 @@ def load_or_init_model(lab_label: str, n_features: int):
         try:
             with open(latest_global, 'rb') as f:
                 model = pickle.load(f)
+                if not is_supported_fl_model(model):
+                    raise ValueError(f"Unsupported legacy global model type: {type(model).__name__}")
                 # Also copy it to the lab's local path for persistence
                 local_path = model_path_for_lab(lab_label)
                 with open(local_path, 'wb') as lf:
                     pickle.dump(model, lf)
                 return model
         except Exception as e:
-            print(f"Error loading global model: {e}, falling back to local model")
-    
+            print(f"Error loading global model: {e}, falling back to local logistic FL model")
+
     # Check for lab's local model
     path = model_path_for_lab(lab_label)
     if os.path.exists(path):
         print(f"Loading local model for {lab_label}: {path}")
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-    
+        try:
+            with open(path, 'rb') as f:
+                model = pickle.load(f)
+            if not is_supported_fl_model(model):
+                raise ValueError(f"Unsupported legacy local model type: {type(model).__name__}")
+            return model
+        except Exception as e:
+            print(f"Error loading local model: {e}, creating a fresh logistic FL model instead")
+
     # Create new model based on configured type
     print(f"Creating new {MODEL_TYPE} model for {lab_label}")
     if MODEL_TYPE == 'random_forest':
@@ -293,10 +328,10 @@ def load_or_init_model(lab_label: str, n_features: int):
             random_state=42
         )
     else:  # Default to logistic regression
-        m = LogisticRegression(max_iter=200, random_state=42)
-    
+        m = create_fl_logistic_model(n_features)
+
     # Initialize for tree-based models (they don't need coef_ initialization)
-    if hasattr(m, 'coef_'):
+    if hasattr(m, 'coef_') and getattr(m, 'coef_', None) is None:
         m.coef_ = np.zeros((4, n_features))
         m.intercept_ = np.zeros((4,))
     m.classes_ = np.array([0, 1, 2, 3])

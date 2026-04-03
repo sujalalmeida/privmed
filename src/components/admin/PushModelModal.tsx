@@ -134,8 +134,8 @@ export default function PushModelModal({ isOpen, onClose, serverUrl, globalModel
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex items-center justify-between">
           <div className="text-white">
-            <h2 className="text-xl font-bold">Push Global Model</h2>
-            <p className="text-sm text-blue-100">Broadcast v{globalModelVersion} to all labs</p>
+            <h2 className="text-xl font-bold">Distribute Global Weights</h2>
+            <p className="text-sm text-blue-100">Broadcast global weights v{globalModelVersion} to all labs</p>
           </div>
           <button
             onClick={onClose}
@@ -157,7 +157,7 @@ export default function PushModelModal({ isOpen, onClose, serverUrl, globalModel
           {success && (
             <div className="mb-4 p-4 bg-green-50 border-l-4 border-green-500 text-green-700 flex items-start">
               <CheckCircle className="w-5 h-5 mr-2 flex-shrink-0 mt-0.5" />
-              <span>Global model pushed successfully to all labs!</span>
+              <span>Global weights distributed successfully to all labs.</span>
             </div>
           )}
 
@@ -166,10 +166,10 @@ export default function PushModelModal({ isOpen, onClose, serverUrl, globalModel
             <div className="text-center py-6">
               <Send className="w-16 h-16 mx-auto mb-4 text-blue-500" />
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Ready to Push Global Model v{globalModelVersion}
+                Ready to Distribute Global Weights v{globalModelVersion}
               </h3>
               <p className="text-gray-600 mb-6">
-                This will notify all participating labs that a new global model is available for download.
+                This will notify all participating labs that new global weights are available for download.
               </p>
               <button
                 onClick={handlePush}
@@ -186,7 +186,7 @@ export default function PushModelModal({ isOpen, onClose, serverUrl, globalModel
                 ) : (
                   <>
                     <Send className="w-5 h-5 mr-2" />
-                    Push to All Labs
+                    Distribute To All Labs
                   </>
                 )}
               </button>

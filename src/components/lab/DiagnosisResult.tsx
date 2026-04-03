@@ -12,20 +12,9 @@ interface PredictionResult {
   };
 }
 
-interface ModelInfo {
-  current_model_type: 'global' | 'local' | 'baseline' | 'none';
-  current_model_version: number | null;
-  current_model_accuracy: number | null;
-  current_model_accuracy_percent: string | null;
-  last_updated: string | null;
-  has_model: boolean;
-}
-
 interface DiagnosisResultProps {
   result: PredictionResult | null;
   isLoading: boolean;
-  nodeAccuracy?: number | null;
-  modelInfo?: ModelInfo | null;
 }
 
 const DIAGNOSIS_COLORS: Record<string, string> = {
@@ -49,36 +38,7 @@ const DIAGNOSIS_DESCRIPTIONS: Record<string, string> = {
   heart_disease: 'Cardiac markers suggest cardiovascular concerns. Further cardiac workup recommended.',
 };
 
-const MODEL_TYPE_LABELS: Record<string, string> = {
-  global: 'Federated Global Model',
-  local: 'Local Model',
-  baseline: 'Baseline Model',
-  none: 'Rule-Based',
-};
-
-export default function DiagnosisResult({ result, isLoading, nodeAccuracy, modelInfo }: DiagnosisResultProps) {
-  // Render model accuracy badge
-  const renderModelAccuracyBadge = () => {
-    if (nodeAccuracy === null && nodeAccuracy === undefined) return null;
-    
-    const modelType = modelInfo?.current_model_type || 'unknown';
-    const modelLabel = MODEL_TYPE_LABELS[modelType] || modelType;
-    
-    return (
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-2 bg-primary-50 px-3 py-1.5 rounded-lg">
-          <span className="text-sm text-primary-600 font-medium">Model Accuracy:</span>
-          <span className="text-lg font-bold text-primary-700">
-            {nodeAccuracy !== null && nodeAccuracy !== undefined 
-              ? `${(nodeAccuracy * 100).toFixed(1)}%`
-              : 'N/A'}
-          </span>
-        </div>
-        <span className="text-xs text-gray-500">{modelLabel}</span>
-      </div>
-    );
-  };
-
+export default function DiagnosisResult({ result, isLoading }: DiagnosisResultProps) {
   if (isLoading) {
     return (
       <div className="clinical-section diagnosis-result">
@@ -94,10 +54,7 @@ export default function DiagnosisResult({ result, isLoading, nodeAccuracy, model
   if (!result) {
     return (
       <div className="clinical-section diagnosis-result">
-        <div className="flex justify-between items-center mb-4">
-          <h3>AI Prediction</h3>
-          {renderModelAccuracyBadge()}
-        </div>
+        <h3>AI Prediction</h3>
         <div className="text-center py-8 text-gray-500">
           <p>Complete the form and submit to get AI-powered diagnosis prediction</p>
         </div>
@@ -112,9 +69,8 @@ export default function DiagnosisResult({ result, isLoading, nodeAccuracy, model
 
   return (
     <div className="clinical-section diagnosis-result">
-      <div className="flex justify-between items-center mb-4">
+      <div className="mb-4">
         <h3 className="mb-0">AI Prediction Result</h3>
-        {renderModelAccuracyBadge()}
       </div>
       
       {/* Main diagnosis card */}

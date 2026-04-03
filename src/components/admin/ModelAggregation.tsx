@@ -7,7 +7,10 @@ interface LabStatus {
   lab: string;
   last_update: string;
   local_accuracy: number | null;
+  local_test_accuracy: number | null;
   num_examples: number | null;
+  effective_samples?: number | null;
+  approval_rate?: number | null;
   has_model: boolean;
   ready_for_aggregation: boolean;
 }
@@ -16,12 +19,17 @@ interface AggregationResult {
   success: boolean;
   modelVersion: number;
   globalAccuracy: number | null;
+  globalValidationAccuracy?: number | null;
   num_models_aggregated: number;
   total_samples: number;
+  total_effective_samples?: number;
   lab_contributions: Array<{
     lab: string;
     samples: number;
-    accuracy: number;
+    effective_samples?: number;
+    local_test_accuracy?: number;
+    approval_rate?: number;
+    doctor_weight_multiplier?: number;
     weight: number;
   }>;
   model_type: string;
@@ -34,6 +42,7 @@ interface AggregationStatus {
     created_at: string | null;
     num_labs_contributed: number;
     total_samples: number;
+    global_validation_accuracy?: number | null;
   };
   labs: LabStatus[];
   recent_rounds: any[];
@@ -44,6 +53,7 @@ interface AggregationStatus {
 interface RoundMetric {
   round: number;
   global_accuracy: number;
+  global_validation_accuracy?: number;
   created_at: string;
 }
 
@@ -113,7 +123,11 @@ export default function ModelAggregation() {
       
       const data: AggregationResult = await resp.json();
       setLastResult(data);
-      setSuccess(`Successfully created global model v${data.modelVersion}!`);
+      setSuccess(
+        data.globalValidationAccuracy !== null && data.globalValidationAccuracy !== undefined
+          ? `Successfully created global weights v${data.modelVersion} and recorded Global Validation Accuracy.`
+          : `Successfully aggregated encrypted global weights v${data.modelVersion}. Waiting for lab-side validation reporting.`
+      );
       
       // Refresh status and metrics
       setTimeout(() => {
@@ -150,16 +164,20 @@ export default function ModelAggregation() {
             <div className="w-9 h-9 bg-success-50 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-5 h-5 text-success-500" />
             </div>
-            <span className="text-xs font-medium text-neutral-500 uppercase">Accuracy</span>
+            <span className="text-xs font-medium text-neutral-500 uppercase">Validation</span>
           </div>
           <div className="text-2xl font-semibold text-neutral-900">
-            {lastResult?.globalAccuracy 
-              ? `${(lastResult.globalAccuracy * 100).toFixed(1)}%`
+            {lastResult?.globalValidationAccuracy !== undefined && lastResult?.globalValidationAccuracy !== null
+              ? `${(lastResult.globalValidationAccuracy * 100).toFixed(1)}%`
+              : status?.current_global_model.global_validation_accuracy !== null && status?.current_global_model.global_validation_accuracy !== undefined
+              ? `${(status.current_global_model.global_validation_accuracy * 100).toFixed(1)}%`
+              : status?.recent_rounds[0]?.global_validation_accuracy
+              ? `${(status.recent_rounds[0].global_validation_accuracy * 100).toFixed(1)}%`
               : status?.recent_rounds[0]?.global_accuracy
               ? `${(status.recent_rounds[0].global_accuracy * 100).toFixed(1)}%`
               : 'N/A'}
           </div>
-          <div className="text-xs text-neutral-500 mt-1">Last aggregation</div>
+          <div className="text-xs text-neutral-500 mt-1">Global Validation Accuracy</div>
         </div>
 
         <div className="card p-5 border-l-3 border-l-heart-disease">
@@ -193,7 +211,7 @@ export default function ModelAggregation() {
           <div>
             <h3 className="text-base font-semibold text-neutral-900">Model Aggregation Control</h3>
             <p className="text-sm text-neutral-500 mt-1">
-              Federated Averaging (FedAvg) — Combine local models into global knowledge
+              Federated Averaging (FedAvg) — aggregate lab weight updates, then evaluate the aggregated model on the central validation split
             </p>
           </div>
           <button
@@ -203,6 +221,18 @@ export default function ModelAggregation() {
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+        </div>
+        
+        {/* Homomorphic Encryption Status */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+          <div className="flex items-center">
+            <svg className="w-4 h-4 text-blue-600 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            <p className="text-xs font-medium text-blue-800">
+              Secure Aggregation: All model updates are homomorphically encrypted. Aggregation is performed on encrypted weights.
+            </p>
+          </div>
         </div>
 
         {error && (
@@ -228,12 +258,12 @@ export default function ModelAggregation() {
             {isAggregating ? (
               <>
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Aggregating Models...
+                Aggregating And Validating...
               </>
             ) : (
               <>
                 <Zap className="w-4 h-4 mr-2" />
-                Aggregate Models Now
+                Aggregate Weight Updates Now
               </>
             )}
           </button>
@@ -244,7 +274,7 @@ export default function ModelAggregation() {
             className="btn-primary bg-success-500 hover:bg-success-600"
           >
             <Send className="w-4 h-4 mr-2" />
-            Push to All Labs
+            Distribute Global Weights To Labs
           </button>
 
           <div className="text-sm text-neutral-500">
@@ -307,9 +337,9 @@ export default function ModelAggregation() {
 
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between items-center">
-                    <span className="text-neutral-500">Local Accuracy:</span>
+                    <span className="text-neutral-500">Local Test Accuracy:</span>
                     <span className="font-medium text-neutral-900">
-                      {lab.local_accuracy ? `${(lab.local_accuracy * 100).toFixed(1)}%` : 'N/A'}
+                      {lab.local_test_accuracy !== null && lab.local_test_accuracy !== undefined ? `${(lab.local_test_accuracy * 100).toFixed(1)}%` : 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -346,16 +376,20 @@ export default function ModelAggregation() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-white rounded-lg p-4 border border-neutral-200">
-              <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Performance Metrics</h4>
+              <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Validation Metrics</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-neutral-600">Global Model Version:</span>
                   <span className="font-semibold text-primary-500">v{lastResult.modelVersion}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-600">Global Accuracy:</span>
+                  <span className="text-neutral-600">Global Validation Accuracy:</span>
                   <span className="font-semibold text-success-500">
-                    {lastResult.globalAccuracy ? `${(lastResult.globalAccuracy * 100).toFixed(2)}%` : 'N/A'}
+                    {lastResult.globalValidationAccuracy !== undefined && lastResult.globalValidationAccuracy !== null
+                      ? `${(lastResult.globalValidationAccuracy * 100).toFixed(2)}%`
+                      : lastResult.globalAccuracy !== null && lastResult.globalAccuracy !== undefined
+                      ? `${(lastResult.globalAccuracy * 100).toFixed(2)}%`
+                      : 'N/A'}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -363,8 +397,12 @@ export default function ModelAggregation() {
                   <span className="font-semibold text-primary-500">{lastResult.num_models_aggregated}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-600">Total Samples:</span>
+                  <span className="text-neutral-600">Total Train Samples:</span>
                   <span className="font-semibold text-heart-disease">{lastResult.total_samples}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-neutral-600">Total Effective Samples:</span>
+                  <span className="font-semibold text-primary-500">{lastResult.total_effective_samples ?? lastResult.total_samples}</span>
                 </div>
               </div>
             </div>
@@ -379,7 +417,10 @@ export default function ModelAggregation() {
                       <span className="text-sm font-medium text-neutral-900">{contrib.lab}</span>
                     </div>
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-neutral-500">{contrib.samples} samples</span>
+                      <span className="text-neutral-500">{contrib.samples} train samples</span>
+                      {contrib.doctor_weight_multiplier && contrib.doctor_weight_multiplier > 1 ? (
+                        <span className="text-success-600 font-medium">{contrib.doctor_weight_multiplier.toFixed(1)}x doctor modifier</span>
+                      ) : null}
                       <span className="font-medium text-primary-500">
                         {(contrib.weight * 100).toFixed(1)}% weight
                       </span>
@@ -397,7 +438,7 @@ export default function ModelAggregation() {
         <div className="card p-6">
           <h3 className="text-base font-semibold text-neutral-900 mb-4 flex items-center">
             <BarChart3 className="w-4 h-4 mr-2 text-primary-500" />
-            Accuracy Over Aggregation Rounds
+            Global Validation Accuracy Over Aggregation Rounds
           </h3>
           
           <div className="overflow-x-auto">
@@ -405,7 +446,7 @@ export default function ModelAggregation() {
               <thead className="bg-neutral-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Round</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Global Accuracy</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Global Validation Accuracy</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Change</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wider">Trend</th>

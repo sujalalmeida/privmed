@@ -10,6 +10,7 @@ from typing import Optional, List
 import base64
 import json
 import socket
+import warnings
 from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -18,8 +19,11 @@ from supabase import create_client
 import pandas as pd
 import numpy as np
 import glob
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
 from lab_model import (
     CATEGORICAL_MAPS,
@@ -29,13 +33,28 @@ from lab_model import (
     encode_clinical_features,
     ensure_features_for_model,
     model_path_for_lab,
+    is_supported_fl_model,
     load_or_init_model,
     save_model,
     get_parameters,
     set_parameters,
+    create_fl_logistic_model,
     predict_prob,
     predict_with_baseline,
     predict_rule_based,
+)
+
+# Real TenSEAL CKKS helpers for FL weight protection.
+from tenseal_ckks import (
+    HE_CONTEXT_VERSION,
+    aggregate_encrypted_weight_payloads,
+    approximation_error_for_lab,
+    apply_flat_weights_to_model,
+    build_encrypted_numeric_vector_payload,
+    build_encrypted_weight_payload,
+    decrypt_weight_payload_for_lab,
+    get_he_stats,
+    load_encrypted_weight_payload,
 )
 
 # Load env from both repo root and server folder.
@@ -61,6 +80,37 @@ _server_thread: Optional[threading.Thread] = None
 _server_stop = threading.Event()
 _client_procs: List[subprocess.Popen] = []
 _current_run_id: Optional[str] = None
+
+LOCAL_EPOCHS = 5
+PATIENT_PREDICTION_MIN_CONFIDENCE = 0.40
+LAB_DATASET_FILES = {
+    'lab_A': 'lab_A_data.csv',
+    'lab_B': 'lab_B_data.csv',
+    'lab_C': 'lab_A_data.csv',
+    'lab_D': 'lab_B_data.csv',
+}
+CLINICAL_NUMERIC_FIELD_KEYS = [
+    'age',
+    'height_cm',
+    'weight_kg',
+    'bmi',
+    'systolic_bp',
+    'diastolic_bp',
+    'heart_rate',
+    'fasting_glucose',
+    'hba1c',
+    'insulin',
+    'total_cholesterol',
+    'ldl_cholesterol',
+    'hdl_cholesterol',
+    'triglycerides',
+    'chest_pain_type',
+    'resting_ecg',
+    'max_heart_rate',
+    'exercise_angina',
+    'st_depression',
+    'st_slope',
+]
 
 
 def sb():
@@ -146,142 +196,125 @@ def normalize_lab_label(raw_label: str) -> str:
     return label
 
 
+def _load_encoded_dataset(csv_name: str):
+    """Load a clinical CSV dataset into encoded feature/label arrays."""
+    data_path = os.path.join(os.path.dirname(__file__), 'data', csv_name)
+    if not os.path.exists(data_path):
+        print(f"Dataset not found: {data_path}")
+        return None, None
+
+    try:
+        df = pd.read_csv(data_path)
+        X_list, y_list = [], []
+        for _, r in df.iterrows():
+            try:
+                row_dict = r.to_dict()
+                X_row, _ = encode_clinical_features(row_dict)
+                label = row_dict.get('diagnosis', row_dict.get('label', row_dict.get('disease_label')))
+                if label is None or X_row.shape[1] != len(FEATURE_COLUMNS):
+                    continue
+                X_list.append(X_row)
+                y_list.append(int(label))
+            except Exception:
+                continue
+
+        if not X_list:
+            print(f"No valid samples found in {csv_name}")
+            return None, None
+
+        X = np.vstack(X_list)
+        y = np.array(y_list, dtype=int)
+        print(f"Loaded {csv_name}: {len(y)} samples")
+        return X, y
+    except Exception as e:
+        print(f"Error loading dataset {csv_name}: {e}")
+        return None, None
+
+
+def load_validation_dataset():
+    """Load the central held-out validation dataset for live global evaluation."""
+    return _load_encoded_dataset('combined_validation.csv')
+
+
 def load_test_dataset():
+    """Load the offline/final held-out test dataset."""
+    return _load_encoded_dataset('combined_test.csv')
+
+
+def get_lab_dataset_split(lab_label: str):
     """
-    Load the shared test dataset (combined_test.csv) with consistent encoding.
-    Used for both local model validation and global model evaluation to ensure
-    comparable accuracy metrics.
-    
-    Returns:
-        tuple: (X_test, y_test) as numpy arrays, or (None, None) if loading fails
+    Load the authoritative per-lab CSV dataset and return a deterministic 80/20 split.
+    The 20% split is reserved permanently as the lab's local test set.
     """
-    from lab_model import encode_clinical_features
-    
-    data_path = os.path.join(os.path.dirname(__file__), 'data', 'combined_test.csv')
-    
-    if not os.path.exists(data_path):
-        print(f"Test dataset not found: {data_path}")
-        return None, None
-    
+    csv_name = LAB_DATASET_FILES.get(lab_label)
+    if not csv_name:
+        raise ValueError(f"No FL dataset configured for lab '{lab_label}'")
+
+    X, y = _load_encoded_dataset(csv_name)
+    if X is None or y is None:
+        raise ValueError(f"Unable to load FL dataset for lab '{lab_label}'")
+
+    return train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=RANDOM_SEED,
+        stratify=y,
+    )
+
+
+def evaluate_model_accuracy(model, X_eval: np.ndarray, y_eval: np.ndarray) -> float | None:
+    """Evaluate model accuracy on a provided held-out dataset."""
     try:
-        df = pd.read_csv(data_path)
-        X_list, y_list = [], []
-        
-        for _, r in df.iterrows():
-            try:
-                row_dict = r.to_dict()
-                X_row, _ = encode_clinical_features(row_dict)
-                if X_row.shape[1] != 27:
-                    continue
-                X_list.append(X_row)
-                # Use 'diagnosis' as primary label (the actual column in combined_test.csv)
-                # Fallback to 'label' or 'disease_label' for compatibility
-                label = row_dict.get('diagnosis', row_dict.get('label', row_dict.get('disease_label', 0)))
-                y_list.append(int(label))
-            except Exception:
-                continue
-        
-        if len(X_list) == 0:
-            print("No valid samples could be encoded from test data")
-            return None, None
-        
-        X_test = np.vstack(X_list)
-        y_test = np.array(y_list, dtype=int)
-        print(f"Loaded test dataset: {len(y_test)} samples, label distribution: {dict(zip(*np.unique(y_test, return_counts=True)))}")
-        return X_test, y_test
-        
+        X_eval = ensure_features_for_model(X_eval, model)
+        preds = model.predict(X_eval)
+        return float(accuracy_score(y_eval, preds))
     except Exception as e:
-        print(f"Error loading test dataset: {e}")
-        return None, None
+        print(f"Error evaluating model accuracy: {e}")
+        return None
 
 
-def load_training_dataset():
-    """
-    Load the combined training dataset for global model retraining.
-    
-    Returns:
-        tuple: (X_train, y_train) as numpy arrays, or (None, None) if loading fails
-    """
-    from lab_model import encode_clinical_features
-    
-    data_path = os.path.join(os.path.dirname(__file__), 'data', 'combined_train.csv')
-    
-    if not os.path.exists(data_path):
-        print(f"Training dataset not found: {data_path}")
-        return None, None
-    
-    try:
-        df = pd.read_csv(data_path)
-        X_list, y_list = [], []
-        
-        for _, r in df.iterrows():
-            try:
-                row_dict = r.to_dict()
-                X_row, _ = encode_clinical_features(row_dict)
-                if X_row.shape[1] != 27:
-                    continue
-                X_list.append(X_row)
-                label = row_dict.get('diagnosis', row_dict.get('label', row_dict.get('disease_label', 0)))
-                y_list.append(int(label))
-            except Exception:
-                continue
-        
-        if len(X_list) == 0:
-            print("No valid samples could be encoded from training data")
-            return None, None
-        
-        X_train = np.vstack(X_list)
-        y_train = np.array(y_list, dtype=int)
-        print(f"Loaded training dataset: {len(y_train)} samples, label distribution: {dict(zip(*np.unique(y_train, return_counts=True)))}")
-        return X_train, y_train
-        
-    except Exception as e:
-        print(f"Error loading training dataset: {e}")
-        return None, None
-
-
-def evaluate_model_on_test_set(model, model_type='tree'):
-    """
-    Evaluate a model on the shared test dataset.
-    
-    Args:
-        model: Trained sklearn model
-        model_type: 'tree' for tree-based models (no scaling), 'linear' for linear models (with scaling)
-    
-    Returns:
-        float: Accuracy on test set, or None if evaluation fails
-    """
+def evaluate_model_on_test_set(model) -> float | None:
+    """Evaluate a model on the offline/final combined test set."""
     X_test, y_test = load_test_dataset()
-    if X_test is None:
+    if X_test is None or y_test is None:
         return None
-    
-    try:
-        # Pad features if model expects more dimensions (e.g., 27 -> 33)
-        X_test_eval = ensure_features_for_model(X_test, model)
-        
-        # Tree-based models don't need scaling; linear models do
-        if model_type == 'linear':
-            scaler = StandardScaler()
-            X_test_eval = scaler.fit_transform(X_test_eval)
-        
-        preds = model.predict(X_test_eval)
-        accuracy = float((preds == y_test).mean())
-        return accuracy
-    except Exception as e:
-        print(f"Error evaluating model on test set: {e}")
+    return evaluate_model_accuracy(model, X_test, y_test)
+
+
+def fit_local_epoch(model, X_train: np.ndarray, y_train: np.ndarray):
+    """Run one local epoch while suppressing expected sklearn warm-start noise."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        model.fit(X_train, y_train)
+    return model
+
+
+def build_encrypted_numeric_field_bundle(lab_label: str, body: dict) -> dict | None:
+    values = []
+    for key in CLINICAL_NUMERIC_FIELD_KEYS:
+        value = body.get(key)
+        if value is None or value == '':
+            continue
+        try:
+            values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if not values:
         return None
+    return build_encrypted_numeric_vector_payload(lab_label, values)
 
 
 def get_lab_node_accuracy(lab_label: str) -> float | None:
     """
     Get the current node accuracy for a lab.
     
-    This returns the single accuracy number that represents how good this lab's
-    current model is overall, evaluated on the shared test set.
+    This returns the current Local Test Accuracy for the lab.
     
     Priority:
-    1. From fl_model_downloads (if lab has downloaded global model, use that accuracy)
-    2. From fl_client_updates (lab's last trained model accuracy)
+    1. From fl_model_downloads (if lab has downloaded global weights, use re-evaluated local test accuracy)
+    2. From fl_client_updates (lab's last local test accuracy)
     3. None if no data available
     
     Args:
@@ -364,6 +397,8 @@ def get_lab_current_model(lab_label: str):
         try:
             with open(latest_global, 'rb') as f:
                 model = pickle.load(f)
+                if not is_supported_fl_model(model):
+                    raise ValueError(f"Unsupported stale prediction model type: {type(model).__name__}")
                 print(f"Using downloaded global model for {lab_label}: {os.path.basename(latest_global)}")
                 return model, 'global'
         except Exception as e:
@@ -375,6 +410,8 @@ def get_lab_current_model(lab_label: str):
         try:
             with open(local_path, 'rb') as f:
                 model = pickle.load(f)
+                if not is_supported_fl_model(model):
+                    raise ValueError(f"Unsupported stale prediction model type: {type(model).__name__}")
                 print(f"Using local model for {lab_label}")
                 return model, 'local'
         except Exception as e:
@@ -446,6 +483,31 @@ def predict_with_lab_model(lab_label: str, patient_data: dict) -> dict:
         result = predict_rule_based(patient_data)
         result['model_source'] = 'rule_based'
         return result
+
+
+def predict_for_patient_ui(lab_label: str, patient_data: dict) -> dict:
+    """
+    Make a patient-facing prediction.
+    Use the FL model when it is decisive enough; otherwise fall back to
+    rule-based clinical logic instead of surfacing a near-uniform guess.
+    """
+    ml_prediction = predict_with_lab_model(lab_label, patient_data)
+    model_source = ml_prediction.get('model_source', 'unknown')
+    confidence = float(ml_prediction.get('confidence') or 0.0)
+
+    if model_source in {'global', 'local'} and confidence < PATIENT_PREDICTION_MIN_CONFIDENCE:
+        fallback_prediction = predict_rule_based(patient_data)
+        fallback_prediction['model_source'] = 'rule_based'
+        fallback_prediction['fallback_reason'] = (
+            f"{model_source}_model_low_confidence_{confidence:.3f}"
+        )
+        print(
+            f"Prediction fallback for {lab_label}: {model_source} model confidence "
+            f"{confidence:.1%} is below {PATIENT_PREDICTION_MIN_CONFIDENCE:.0%}; using rule-based prediction"
+        )
+        return fallback_prediction
+
+    return ml_prediction
 
 
 def generate_clinical_insights(body: dict, disease_type: str, risk_score: float) -> dict:
@@ -973,18 +1035,16 @@ def submit_patient_data():
         body = request.get_json(force=True) or {}
         # Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
         lab_label = normalize_lab_label(body.get('lab_label', 'lab_A'))
+        encrypted_numeric_bundle = build_encrypted_numeric_field_bundle(lab_label, body)
         
         print(f"Received patient data for prediction from {lab_label}")
         
         # Use the lab's current model (global > local > baseline > rule-based)
-        prediction = predict_with_lab_model(lab_label, body)
+        prediction = predict_for_patient_ui(lab_label, body)
         model_source = prediction.get('model_source', 'unknown')
         
         # Generate clinical insights
         insights = generate_clinical_insights(body, prediction['diagnosis_label'], prediction['confidence'])
-        
-        # Get the lab's current node accuracy
-        node_accuracy = get_lab_node_accuracy(lab_label)
         
         # Also return the old format fields for backward compatibility
         response = {
@@ -1005,7 +1065,7 @@ def submit_patient_data():
             'model_type': f'{model_source}_model',
             'model_source': model_source,
             'lab_label': lab_label,
-            'node_accuracy': node_accuracy,
+            'he_numeric_fields_protected': encrypted_numeric_bundle is not None,
         }
         
         print(f"Prediction: {prediction['diagnosis_label']} ({prediction['confidence']:.1%} confidence) using {model_source} model")
@@ -1035,6 +1095,7 @@ def add_patient_data():
     try:
         body = request.get_json(force=True) or {}
         lab_label = body.get('lab_label') or 'lab_sim'
+        encrypted_numeric_bundle = build_encrypted_numeric_field_bundle(lab_label, body)
         
         # Encode features for the new patient
         X_req, _ = encode_features(body)
@@ -1130,21 +1191,15 @@ def add_patient_data():
                     X_train = np.vstack([X_train, synthetic_X])
                     y_train = np.concatenate([y_train, synthetic_y])
             
-            # Scale features and train
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            model.fit(X_train_scaled, y_train)
+            model.fit(X_train, y_train)
             save_model(lab_label, model)
             
-            # Calculate model accuracy on shared test set (not training data)
-            # This gives comparable metrics across labs and with global accuracy
-            local_accuracy = evaluate_model_on_test_set(model, model_type='tree')
+            local_accuracy = evaluate_model_on_test_set(model)
             if local_accuracy is None:
-                # Fallback to training accuracy if test set unavailable
-                local_accuracy = float(model.score(X_train_scaled, y_train))
-                print(f"Using training accuracy as fallback: {local_accuracy:.1%}")
+                local_accuracy = 0.0
+                print("Offline combined test set unavailable; returning 0.0 for legacy local_accuracy field")
             else:
-                print(f"Model evaluated on test set: {local_accuracy:.1%} accuracy")
+                print(f"Model evaluated on offline test set: {local_accuracy:.1%} accuracy")
             
             # Compute grad norm (handle dimension mismatches gracefully)
             try:
@@ -1246,7 +1301,8 @@ def add_patient_data():
             'local_accuracy': local_accuracy,
             'num_examples': int(X_train.shape[0]),
             'storage_path': str(storage_path) if storage_path else None,
-            'insights': insights
+            'insights': insights,
+            'he_numeric_fields_protected': encrypted_numeric_bundle is not None,
         })
     except Exception as e:
         print(f"Error in add_patient_data: {e}")
@@ -1255,97 +1311,37 @@ def add_patient_data():
 
 @app.post("/lab/send_model_update")
 def send_model_update():
-    """Retrain and send model update without new patient data"""
+    """Train for one local FL round and send encrypted weights to the global server."""
     body = request.get_json(force=True) or {}
     raw_lab_label = body.get('lab_label') or 'lab_sim'
-    # Use centralized lab label normalization
     lab_label = normalize_lab_label(raw_lab_label)
     
     try:
-        # Debug: Print the lab_label being searched for
-        print(f"Searching for patient records with lab_label: '{lab_label}'")
-        
-        # Get all patient records for this lab from database
-        lab_records = sb().table('patient_records').select('*').eq('lab_label', lab_label).execute()
-        
-        # Debug: Print total records found
-        print(f"Found {len(lab_records.data) if lab_records.data else 0} records for lab_label: '{lab_label}'")
-        
-        if not lab_records.data:
-            # Debug: Let's see what lab_labels exist in the database
-            all_records = sb().table('patient_records').select('lab_label').execute()
-            existing_labels = set([r['lab_label'] for r in all_records.data]) if all_records.data else set()
-            print(f"Existing lab_labels in database: {existing_labels}")
-            return jsonify({'error': f'No patient data found for lab: {lab_label}. Available labs: {list(existing_labels)}'}), 400
-        
-        # Convert to training data
-        X_list = []
-        y_list = []
-        expected_dims = 27  # New clinical schema always uses 27 features
-        for record in lab_records.data:
-            # Get disease label - support both 'disease_label' (old) and 'diagnosis' (new)
-            disease_label = record.get('disease_label')
-            if disease_label is None:
-                disease_label = record.get('diagnosis')
-            if disease_label is None:
-                print(f"Warning: Skipping record with missing disease_label/diagnosis")
-                continue
-            
-            X_row = _encode_row_from_db(record)
-            # Log first record's dimensions
-            if len(X_list) == 0:
-                print(f"Training with {X_row.shape[1]} features (detected from first record)")
-            # Ensure feature vector has consistent dimensions
-            if X_row.shape[1] != expected_dims:
-                print(f"Warning: Feature dimension mismatch. Got: {X_row.shape[1]}, expected: {expected_dims}. Skipping.")
-                continue
-            X_list.append(X_row)
-            y_list.append(int(disease_label))
-        
-        if not X_list:
-            return jsonify({'error': 'No valid training data found (all records missing disease_label/diagnosis or have wrong dimensions)'}), 400
-            
-        X_train = np.vstack(X_list)
-        y_train = np.array(y_list, dtype=int)
-        print(f"Successfully loaded {len(X_list)} records for training")
-        
-        # Load current model
-        model = load_or_init_model(lab_label, X_train.shape[1])
-        # Pad to model's expected features if needed (e.g. 27 -> 33 for downloaded global)
-        X_train = ensure_features_for_model(X_train, model)
-        prev_coef, prev_intercept = get_parameters(model)
-        
-        # Retrain model
-        
-        # Check if we have enough classes for multiclass training
-        unique_classes = np.unique(y_train)
-        if len(unique_classes) < 2:
-            # If only one class, create a dummy second class for training
-            print(f"Warning: Only {len(unique_classes)} class(es) found. Adding dummy data for training.")
-            # Use fixed seed for reproducibility
-            rng = np.random.RandomState(RANDOM_SEED)
-            # Add some dummy data with a DIFFERENT label than the existing one
-            existing = int(unique_classes[0])
-            alt = 0 if existing != 0 else 1
-            dummy_X = X_train.copy()
-            noise = rng.normal(0, 0.05, dummy_X.shape)
-            dummy_X = dummy_X + noise
-            dummy_y = np.full(len(dummy_X), alt)
-            X_train = np.vstack([X_train, dummy_X])
-            y_train = np.concatenate([y_train, dummy_y])
-        
-        # Scale features for better training
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        
-        # Train the model directly
-        model.fit(X_train_scaled, y_train)
+        X_train_raw, X_test_raw, y_train, y_test = get_lab_dataset_split(lab_label)
+
+        current_model = load_or_init_model(lab_label, X_train_raw.shape[1])
+        X_train = ensure_features_for_model(X_train_raw, current_model)
+        X_test = ensure_features_for_model(X_test_raw, current_model)
+        prev_coef, prev_intercept = get_parameters(current_model)
+
+        model = create_fl_logistic_model(X_train.shape[1])
+        if hasattr(current_model, 'coef_') and getattr(current_model, 'coef_', None) is not None:
+            try:
+                model.classes_ = np.array([0, 1, 2, 3])
+                model.coef_ = np.array(current_model.coef_, dtype=np.float64)
+                model.intercept_ = np.array(current_model.intercept_, dtype=np.float64)
+                model.n_features_in_ = X_train.shape[1]
+            except Exception:
+                pass
+
+        for epoch in range(LOCAL_EPOCHS):
+            print(f"{lab_label}: local epoch {epoch + 1}/{LOCAL_EPOCHS}")
+            fit_local_epoch(model, X_train, y_train)
+
         save_model(lab_label, model)
-        
-        # Compute grad norm (handle dimension mismatches gracefully)
+
         try:
             new_coef, new_intercept = get_parameters(model)
-            # Check if dimensions match before computing norm
             if new_coef.shape == prev_coef.shape and new_intercept.shape == prev_intercept.shape:
                 grad_norm = float(np.mean([
                     np.linalg.norm((new_coef - prev_coef).ravel(), ord=2),
@@ -1360,53 +1356,72 @@ def send_model_update():
                 ]))
         except Exception as e:
             print(f"Error computing grad norm: {e}. Using default value.")
-            grad_norm = 1.0        
-        # Upload model to Supabase Storage
+            grad_norm = 1.0
+
+        local_test_accuracy = evaluate_model_accuracy(model, X_test, y_test)
+        if local_test_accuracy is None:
+            return jsonify({'error': 'failed to compute local test accuracy'}), 500
+
+        prev_accuracy = None
+        try:
+            prev_update = sb().table('fl_client_updates').select('local_accuracy').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
+            if prev_update.data and prev_update.data[0].get('local_accuracy') is not None:
+                prev_accuracy = float(prev_update.data[0]['local_accuracy'])
+        except Exception as e:
+            print(f"Warning: unable to load previous Local Test Accuracy for {lab_label}: {e}")
+
+        if prev_accuracy is not None and (local_test_accuracy - prev_accuracy) > 0.20:
+            print("Suspicious accuracy jump — possible data leakage")
+
+        try:
+            last_round = sb().table('fl_client_updates').select('round').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
+            round_num = int(last_round.data[0]['round']) + 1 if last_round.data else 1
+        except Exception:
+            round_num = 1
+
+        approximation_error = approximation_error_for_lab(lab_label)
+        print(f"Round approximation error: {approximation_error}")
+        if approximation_error > 1e-4:
+            print("WARNING: CKKS approximation error exceeded 1e-4")
+
         timestamp = int(time.time())
-        storage_path = f"models/local/{lab_label}/{timestamp}.pkl"
-        
+        storage_path = f"models/local/{lab_label}/{timestamp}.bin"
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pkl') as tmp:
-            pickle.dump(model, tmp)
+            encrypted_payload = build_encrypted_weight_payload(
+                model,
+                lab_label=lab_label,
+                num_examples=int(X_train.shape[0]),
+            )
+            tmp.write(encrypted_payload)
             tmp_path = tmp.name
         
         try:
             with open(tmp_path, 'rb') as f:
                 storage_client = sb().storage.from_('models')
-                upload_response = storage_client.upload(storage_path, f.read())
-                print(f"Model uploaded successfully to: {storage_path}")
+                storage_client.upload(storage_path, f.read())
+                print(f"[HE] Encrypted model uploaded to: {storage_path}")
         except Exception as e:
-            print(f"Error uploading model to storage: {e}")
-            # Try alternative storage path without special characters  
+            print(f"Error uploading encrypted model to storage: {e}")
             try:
                 safe_lab_label = lab_label.replace('@', '_at_').replace('.', '_')
                 storage_path = f"models/local/{safe_lab_label}/{timestamp}.pkl"
                 with open(tmp_path, 'rb') as f:
                     storage_client = sb().storage.from_('models')
-                    upload_response = storage_client.upload(storage_path, f.read())
-                    print(f"Model uploaded successfully to alternative path: {storage_path}")
+                    storage_client.upload(storage_path, f.read())
+                    print(f"[HE] Encrypted model uploaded to alternative path: {storage_path}")
             except Exception as e2:
                 print(f"Failed to upload to alternative path: {e2}")
                 storage_path = None
         finally:
             os.unlink(tmp_path)
-        
-        # Insert client update
+
         try:
-            # Evaluate on shared test set for comparable metrics with global accuracy
-            local_accuracy = evaluate_model_on_test_set(model, model_type='tree')
-            if local_accuracy is None:
-                # Fallback to training accuracy if test set unavailable
-                local_accuracy = float(model.score(X_train_scaled, y_train))
-                print(f"Using training accuracy as fallback: {local_accuracy:.1%}")
-            else:
-                print(f"Local model evaluated on test set: {local_accuracy:.1%} accuracy")
-            
-            insert_result = sb().table('fl_client_updates').insert({
+            sb().table('fl_client_updates').insert({
                 'run_id': None,
-                'round': 1,
+                'round': round_num,
                 'client_user_id': None,
                 'client_label': lab_label,
-                'local_accuracy': local_accuracy,
+                'local_accuracy': local_test_accuracy,
                 'grad_norm': float(grad_norm),
                 'num_examples': int(X_train.shape[0]),
                 'storage_path': storage_path,
@@ -1414,15 +1429,17 @@ def send_model_update():
             print(f"Successfully inserted client update for {lab_label}")
         except Exception as e:
             print(f"Error inserting client update: {e}")
-            # Continue execution even if database insert fails
-            local_accuracy = 0.0
         
         return jsonify({
             'model_updated': True,
-            'local_accuracy': local_accuracy,
+            'local_test_accuracy': local_test_accuracy,
+            'local_accuracy': local_test_accuracy,
             'grad_norm': grad_norm,
             'num_examples': int(X_train.shape[0]),
-            'storage_path': storage_path
+            'storage_path': storage_path,
+            'round': round_num,
+            'epochs': LOCAL_EPOCHS,
+            'approximation_error': approximation_error,
         })
         
     except Exception as e:
@@ -1434,271 +1451,135 @@ def send_model_update():
 
 @app.post("/admin/aggregate_models")
 def aggregate_models():
-    """Enhanced model aggregation with FedAvg algorithm and comprehensive metrics"""
+    """Aggregate the latest unaggregated lab updates with CKKS ciphertext-only FedAvg."""
     try:
-        # Get next round number
         try:
             latest_round = sb().table('fl_round_metrics').select('round').order('round', desc=True).limit(1).execute()
             next_round = (latest_round.data[0]['round'] + 1) if latest_round.data else 1
-        except:
+        except Exception:
             next_round = 1
-            
-        # Get latest local models from each lab (one per lab)
+
         try:
-            # Get most recent update per lab with valid storage_path
-            updates = sb().table('fl_client_updates').select('*').not_.is_('storage_path', 'null').order('created_at', desc=True).execute()
+            updates = (
+                sb()
+                .table('fl_client_updates')
+                .select('*')
+                .not_.is_('storage_path', 'null')
+                .is_('aggregated_in_round', 'null')
+                .order('created_at', desc=True)
+                .execute()
+            )
             if not updates.data:
-                return jsonify({'error': 'no local model updates found'}), 400
-            
-            # Group by lab, keep only latest update per lab
+                return jsonify({'error': 'no unaggregated local model updates found'}), 400
+
             lab_updates = {}
             for update in updates.data:
                 lab = update.get('client_label', 'unknown')
+                storage_path = update.get('storage_path')
+                if not storage_path or not str(storage_path).endswith('.bin'):
+                    continue
                 if lab not in lab_updates:
                     lab_updates[lab] = update
-            
+
             updates_list = list(lab_updates.values())
             print(f"Found {len(updates_list)} labs with models for round {next_round}: {list(lab_updates.keys())}")
-            
         except Exception as e:
             print(f"Error fetching client updates: {e}")
             return jsonify({'error': 'failed to fetch model updates'}), 500
 
-        # Download and aggregate models using FedAvg
         models_data = []
-        total_samples = 0
-        
+
+        print(f"[HE] ═══════════════════════════════════════════════════════════════")
+        print(f"[HE] Beginning secure aggregation of {len(updates_list)} encrypted model updates")
+        print(f"[HE] Homomorphic encryption protects individual lab contributions")
+        print(f"[HE] ═══════════════════════════════════════════════════════════════")
+
         for update in updates_list:
             storage_path = update['storage_path']
-            num_examples = update.get('num_examples', 1)
+            num_examples = int(update.get('num_examples') or 0)
             lab_label = update.get('client_label', 'unknown')
-            
-            if not storage_path:
+
+            if not storage_path or num_examples <= 0:
                 continue
-                
+            if not str(storage_path).endswith('.bin'):
+                print(f"[HE] Skipping legacy non-HE update from {lab_label}: {storage_path}")
+                continue
+
             try:
-                # Download model from storage
                 storage_client = sb().storage.from_('models')
-                model_data = storage_client.download(storage_path)
-                
-                # Load model from bytes
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pkl') as tmp:
-                    tmp.write(model_data)
-                    tmp_path = tmp.name
-                
-                with open(tmp_path, 'rb') as f:
-                    model = pickle.load(f)
-                    
-                    # Extract parameters based on model type
-                    if hasattr(model, 'coef_'):  # Linear models (LogisticRegression)
-                        params = {
-                            'coef': model.coef_,
-                            'intercept': model.intercept_,
-                            'type': 'linear'
-                        }
-                    elif hasattr(model, 'feature_importances_'):  # Tree-based models (fitted)
-                        # For tree models, store the entire model
-                        params = {
-                            'model': model,
-                            'type': 'tree',
-                            'feature_importances': model.feature_importances_
-                        }
-                    elif hasattr(model, 'estimators_') or 'Gradient' in str(type(model)) or 'Forest' in str(type(model)):
-                        # Tree-based model that might not be fitted yet, or just fitted
-                        # Store the entire model regardless
-                        params = {
-                            'model': model,
-                            'type': 'tree'
-                        }
-                    else:
-                        print(f"Unknown model type for {lab_label}: {type(model)}")
-                        os.unlink(tmp_path)
-                        continue
-                    
-                    # Accept 27 (new schema) or 33 (legacy) feature models; skip other dimensions
-                    model_features = None
-                    if hasattr(model, 'n_features_in_'):
-                        model_features = model.n_features_in_
-                    VALID_FEATURE_COUNTS = (27, 33)
-                    if model_features is not None and model_features not in VALID_FEATURE_COUNTS:
-                        print(f"Skipping model from {lab_label}: has {model_features} features, expected 27 or 33")
-                        os.unlink(tmp_path)
-                        continue
-                    
-                    models_data.append({
-                        'params': params,
-                        'num_examples': num_examples,
-                        'lab': lab_label,
-                        'accuracy': update.get('local_accuracy', 0),
-                        'model_features': model_features or 27,
-                    })
-                    total_samples += num_examples
-                
-                os.unlink(tmp_path)
-                print(f"Loaded model from {lab_label}: {num_examples} samples, accuracy: {update.get('local_accuracy', 0):.3f}")
-                
+                encrypted_data = storage_client.download(storage_path)
+                print(f"[HE] Retrieved encrypted ciphertext from {lab_label} ({len(encrypted_data):,} bytes)")
+                encrypted_payload = load_encrypted_weight_payload(encrypted_data)
+                model_features = int(encrypted_payload["weight_metadata"]["n_features_in"])
+                if model_features != len(FEATURE_COLUMNS):
+                    print(f"Skipping model from {lab_label}: has {model_features} features, expected {len(FEATURE_COLUMNS)}")
+                    continue
+
+                agreement_info = get_lab_agreement_rate(lab_label)
+                approval_rate = float(agreement_info.get('rate', 0.0))
+                effective_samples = float(num_examples * 1.5) if agreement_info.get('total', 0) > 0 and approval_rate >= 0.8 else float(num_examples)
+
+                models_data.append({
+                    'id': update['id'],
+                    'encrypted_payload': encrypted_payload,
+                    'num_examples': num_examples,
+                    'effective_samples': effective_samples,
+                    'lab': lab_label,
+                    'local_test_accuracy': update.get('local_accuracy'),
+                    'approval_rate': approval_rate,
+                    'approval_reviews': agreement_info.get('total', 0),
+                    'doctor_weight_multiplier': 1.5 if effective_samples > num_examples else 1.0,
+                    'model_features': model_features,
+                    'weight_metadata': encrypted_payload["weight_metadata"],
+                })
+                print(f"[HE] Loaded encrypted payload from {lab_label}: train_samples={num_examples}, effective_samples={effective_samples:.1f}")
             except Exception as e:
-                print(f"Error loading model from {storage_path}: {e}")
+                print(f"[HE] Error processing encrypted update from {storage_path}: {e}")
                 continue
 
         if not models_data:
-            return jsonify({'error': 'no valid models found'}), 400
+            return jsonify({'error': 'no valid encrypted CKKS model updates found; ask labs to send fresh weight updates first'}), 400
 
-        # Only aggregate models with the same feature count (all 27 or all 33)
-        from collections import defaultdict
-        by_features = defaultdict(list)
+        fingerprint_groups = {}
         for data in models_data:
-            by_features[data['model_features']].append(data)
-        # Use the group with most total samples
-        best_feature_count = max(by_features.keys(), key=lambda n: sum(d['num_examples'] for d in by_features[n]))
-        models_data = by_features[best_feature_count]
-        n_features_aggregated = best_feature_count
-        total_samples = sum(d['num_examples'] for d in models_data)
-        print(f"Aggregating {len(models_data)} models with {n_features_aggregated} features, total samples: {total_samples}")
+            fingerprint = data['encrypted_payload']['context_fingerprint']
+            fingerprint_groups.setdefault(fingerprint, []).append(data)
 
-        # ====================================================================
-        # FEEDBACK-BASED REWEIGHTING (Option A from closed-loop feedback)
-        # Labs with higher doctor agreement rates get more weight in aggregation
-        # ====================================================================
-        use_feedback_weights = True  # Set to False to disable feedback weighting
-        feedback_warnings = []
-        
-        if use_feedback_weights:
-            print("Applying feedback-based weight adjustments...")
-            for data in models_data:
-                lab = data['lab']
-                agreement_info = get_lab_agreement_rate(lab)
-                agreement_rate = agreement_info['rate']
-                feedback_count = agreement_info['total']
-                
-                # Only apply adjustment if there's sufficient feedback (at least 3 reviews)
-                if feedback_count >= 3:
-                    # Agreement factor: 0.5 (50% agreement) to 1.0 (100% agreement)
-                    # Labs with low agreement get their weight reduced
-                    agreement_factor = 0.5 + (0.5 * agreement_rate)
-                    
-                    # Adjust the effective sample count based on agreement
-                    original_samples = data['num_examples']
-                    data['num_examples'] = int(original_samples * agreement_factor)
-                    
-                    print(f"  {lab}: agreement={agreement_rate:.1%} ({feedback_count} reviews), "
-                          f"factor={agreement_factor:.2f}, samples {original_samples} -> {data['num_examples']}")
-                    
-                    # Flag labs with low agreement (below 60%)
-                    if agreement_rate < 0.6:
-                        feedback_warnings.append({
-                            'lab': lab,
-                            'agreement_rate': agreement_rate,
-                            'message': f'{lab} has low doctor agreement ({agreement_rate:.0%}) - consider review'
-                        })
-                else:
-                    print(f"  {lab}: insufficient feedback ({feedback_count} reviews), using original weight")
-            
-            # Recalculate total samples after adjustments
-            total_samples = sum(d['num_examples'] for d in models_data)
-            print(f"Total weighted samples after feedback adjustment: {total_samples}")
+        skipped_context_labs = []
+        if len(fingerprint_groups) > 1:
+            dominant_fingerprint, dominant_group = max(
+                fingerprint_groups.items(),
+                key=lambda item: (len(item[1]), sum(row['effective_samples'] for row in item[1])),
+            )
+            for fingerprint, group in fingerprint_groups.items():
+                if fingerprint == dominant_fingerprint:
+                    continue
+                skipped_context_labs.extend(row['lab'] for row in group)
+            print(
+                f"[HE] Skipping {len(skipped_context_labs)} lab update(s) with stale incompatible CKKS contexts: "
+                f"{', '.join(skipped_context_labs)}"
+            )
+            models_data = dominant_group
 
-        # Apply Federated Averaging (FedAvg)
-        model_type = models_data[0]['params']['type']
-        
-        if model_type == 'linear':
-            # Weighted average for linear models
-            weighted_coef = None
-            weighted_intercept = None
-            
-            for data in models_data:
-                weight = data['num_examples'] / total_samples
-                coef_contribution = data['params']['coef'] * weight
-                intercept_contribution = data['params']['intercept'] * weight
-                
-                if weighted_coef is None:
-                    weighted_coef = coef_contribution
-                    weighted_intercept = intercept_contribution
-                else:
-                    weighted_coef += coef_contribution
-                    weighted_intercept += intercept_contribution
-            
-            # Create global model
-            from sklearn.linear_model import LogisticRegression
-            global_model = LogisticRegression(max_iter=200, random_state=42)
-            global_model.coef_ = weighted_coef
-            global_model.intercept_ = weighted_intercept
-            global_model.classes_ = np.array([0, 1, 2, 3])
-            global_model.n_features_in_ = n_features_aggregated
-            
-        else:  # tree-based models
-            # For tree models, we RETRAIN on the combined training data
-            # This ensures the global model actually learns from all data
-            from sklearn.ensemble import GradientBoostingClassifier
-            
-            print(f"Retraining global model on combined training data...")
-            
-            # Load training data
-            X_train, y_train = load_training_dataset()
-            
-            if X_train is not None and y_train is not None:
-                # Get the current round number for increasing model complexity
-                try:
-                    res = sb().table('fl_global_models').select('version').order('version', desc=True).limit(1).execute()
-                    current_round = res.data[0]['version'] + 1 if res and res.data else 1
-                except Exception:
-                    current_round = 1
-                
-                # Increase model complexity with each round (but cap at reasonable values)
-                # This allows the model to improve over time
-                n_estimators = min(100 + (current_round * 20), 300)  # 100 -> 300 over 10 rounds
-                max_depth = min(5 + (current_round // 2), 10)  # 5 -> 10 over 10 rounds
-                learning_rate = max(0.1 - (current_round * 0.005), 0.05)  # 0.1 -> 0.05 over 10 rounds
-                
-                print(f"Round {current_round}: n_estimators={n_estimators}, max_depth={max_depth}, learning_rate={learning_rate:.3f}")
-                
-                # Train a new global model on the combined training data
-                global_model = GradientBoostingClassifier(
-                    n_estimators=n_estimators,
-                    learning_rate=learning_rate,
-                    max_depth=max_depth,
-                    min_samples_split=5,
-                    min_samples_leaf=2,
-                    random_state=RANDOM_SEED + current_round,  # Vary seed by round for diversity
-                )
-                
-                global_model.fit(X_train, y_train)
-                print(f"Global model trained on {len(X_train)} samples")
-                
-            else:
-                # Fallback: Create a voting ensemble if training data not available
-                print("Training data not available, falling back to voting ensemble...")
-                from sklearn.ensemble import VotingClassifier
-                
-                valid_models = [data for data in models_data if 'model' in data['params']]
-                if not valid_models:
-                    return jsonify({'error': 'No valid tree-based models found for aggregation'}), 400
-                
-                estimators = [(f"{data['lab']}", data['params']['model']) for data in valid_models]
-                weights = [data['num_examples'] for data in valid_models]
-                
-                global_model = VotingClassifier(
-                    estimators=estimators,
-                    voting='soft',
-                    weights=weights
-                )
-                
-                # Fit with dummy data
-                n_features = n_features_aggregated
-                rng = np.random.RandomState(RANDOM_SEED)
-                dummy_X = rng.randn(5, n_features)
-                dummy_y = np.array([0, 1, 2, 3, 0])
-                global_model.fit(dummy_X, dummy_y)
-                print(f"Created voting ensemble from {len(valid_models)} lab models")
+        total_effective_samples = float(sum(d['effective_samples'] for d in models_data))
+        if total_effective_samples <= 0:
+            return jsonify({'error': 'invalid effective sample count for aggregation'}), 400
 
-        # Upload global model to Supabase Storage
+        aggregate_input_payloads = []
+        for data in models_data:
+            payload = dict(data['encrypted_payload'])
+            payload['effective_samples'] = data['effective_samples']
+            aggregate_input_payloads.append(payload)
+
+        encrypted_global_payload = aggregate_encrypted_weight_payloads(aggregate_input_payloads)
+        print("Aggregation complete. Server never held plaintext weights.")
+
         timestamp = int(time.time())
-        global_storage_path = f"models/global/v{timestamp}.pkl"
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pkl') as tmp:
-            pickle.dump(global_model, tmp)
+        global_storage_path = f"models/global/v{timestamp}.bin"
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.bin') as tmp:
+            tmp.write(encrypted_global_payload)
             tmp_path = tmp.name
-        
+
         try:
             with open(tmp_path, 'rb') as f:
                 storage_client = sb().storage.from_('models')
@@ -1711,108 +1592,84 @@ def aggregate_models():
         finally:
             os.unlink(tmp_path)
 
-        # Evaluate global model on test dataset using shared helper
-        global_accuracy = None
-        
-        try:
-            print(f"Evaluating global model with {n_features_aggregated} features using combined_test.csv")
-            global_accuracy = evaluate_model_on_test_set(global_model, model_type=model_type)
-            
-            if global_accuracy is not None:
-                print(f"Global model accuracy on test set: {global_accuracy:.3f} (model_type={model_type})")
-            else:
-                # Fallback: use weighted average of local accuracies
-                global_accuracy = sum(data['accuracy'] * data['num_examples'] for data in models_data) / total_samples
-                print(f"Using weighted average of local accuracies: {global_accuracy:.3f}")
-        except Exception as e:
-            print(f"Error evaluating global model: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback: use weighted average of local accuracies
-            global_accuracy = sum(data['accuracy'] * data['num_examples'] for data in models_data) / total_samples
-            print(f"Using weighted average of local accuracies: {global_accuracy:.3f}")
-
-        # Get current max version
         try:
             res = sb().table('fl_global_models').select('version').order('version', desc=True).limit(1).execute()
             maxv = res.data[0]['version'] if res and res.data else 0
         except Exception:
             maxv = 0
         version = int(maxv) + 1
-        
-        # Insert global model record (only columns that exist in the table)
+
         sb().table('fl_global_models').insert({
             'version': version,
-            'model_type': 'gradient_boosting' if model_type == 'tree' else 'logistic_regression',
+            'model_type': 'logistic_regression_ckks',
             'storage_path': global_storage_path
         }).execute()
 
-        # Get or create a run for this aggregation
-        # First, try to get an existing 'running' run
         runs_result = sb().table('fl_runs').select('id').eq('status', 'running').limit(1).execute()
-        
         if runs_result.data and len(runs_result.data) > 0:
-            # Use existing running run
             run_id = runs_result.data[0]['id']
         else:
-            # Create a new run for aggregation
             new_run = sb().table('fl_runs').insert({
                 'status': 'running',
                 'num_rounds': 1,
-                'model_type': 'gradient_boosting' if model_type == 'tree' else 'logreg',
+                'model_type': 'logreg',
             }).execute()
             run_id = new_run.data[0]['id']
-        
-        # Calculate convergence metrics
+
         previous_accuracy = None
         accuracy_delta = None
         convergence_rate = None
-        
         try:
-            # Get previous round's accuracy
             prev_metrics = sb().table('fl_round_metrics').select('*').order('round', desc=True).limit(2).execute()
             if prev_metrics.data and len(prev_metrics.data) >= 1:
-                # Get the most recent previous round (not current)
                 for metric in prev_metrics.data:
                     if metric['round'] < version:
                         previous_accuracy = metric.get('global_accuracy')
                         break
-                
-                if previous_accuracy is not None and global_accuracy is not None:
-                    accuracy_delta = global_accuracy - previous_accuracy
-                    convergence_rate = accuracy_delta / previous_accuracy if previous_accuracy != 0 else 0
-                    print(f"Convergence metrics: Previous={previous_accuracy:.3f}, Current={global_accuracy:.3f}, Delta={accuracy_delta:.4f}, Rate={convergence_rate:.4f}")
+
+                if previous_accuracy is not None:
+                    accuracy_delta = None
+                    convergence_rate = None
         except Exception as conv_error:
             print(f"Warning: Could not calculate convergence metrics: {conv_error}")
-        
-        # Record round metric with valid run_id and convergence data
+
         sb().table('fl_round_metrics').insert({
             'run_id': run_id,
             'round': version,
-            'global_accuracy': global_accuracy,
-            'aggregated_grad_norm': 0.0,  # Default value instead of None
+            'global_accuracy': None,
+            'aggregated_grad_norm': 0.0,
         }).execute()
 
-        # Prepare lab contributions summary
         lab_contributions = [
             {
                 'lab': data['lab'],
                 'samples': data['num_examples'],
-                'accuracy': data['accuracy'],
-                'weight': data['num_examples'] / total_samples
+                'effective_samples': data['effective_samples'],
+                'doctor_weight_multiplier': data['doctor_weight_multiplier'],
+                'approval_rate': data['approval_rate'],
+                'local_test_accuracy': data['local_test_accuracy'],
+                'weight': data['effective_samples'] / total_effective_samples,
             }
             for data in models_data
         ]
 
+        try:
+            used_ids = [data['id'] for data in models_data]
+            sb().table('fl_client_updates').update({'aggregated_in_round': version}).in_('id', used_ids).execute()
+        except Exception as e:
+            print(f"Warning: failed to mark updates as aggregated for round {version}: {e}")
+
         return jsonify({
             'success': True,
             'modelVersion': version,
-            'globalAccuracy': global_accuracy,
+            'globalValidationAccuracy': None,
+            'globalAccuracy': None,
             'storage_path': global_storage_path,
             'num_models_aggregated': len(models_data),
-            'total_samples': total_samples,
+            'total_samples': int(sum(data['num_examples'] for data in models_data)),
+            'total_effective_samples': total_effective_samples,
             'lab_contributions': lab_contributions,
-            'model_type': 'gradient_boosting' if model_type == 'tree' else 'logistic_regression',
+            'model_type': 'logistic_regression',
             'timestamp': timestamp,
             'convergence': {
                 'previous_accuracy': previous_accuracy,
@@ -1820,14 +1677,14 @@ def aggregate_models():
                 'convergence_rate': convergence_rate,
                 'improving': accuracy_delta > 0 if accuracy_delta is not None else None
             },
-            # Feedback-based reweighting info (Option A)
             'feedback_weighting': {
-                'enabled': use_feedback_weights,
-                'warnings': feedback_warnings,
-                'message': 'Labs with higher doctor agreement rates contributed more weight' if use_feedback_weights else None
-            }
+                'enabled': True,
+                'message': 'Labs with doctor approval rate >= 80% received a 1.5x FedAvg weight multiplier',
+            },
+            'skipped_incompatible_context_labs': skipped_context_labs,
+            'round': version,
+            'message': 'Encrypted aggregation complete. Waiting for a lab-side evaluator to report Global Validation Accuracy.',
         })
-        
     except Exception as e:
         print(f"Error in aggregate_models: {e}")
         import traceback
@@ -1839,48 +1696,46 @@ def aggregate_models():
 def get_aggregation_status():
     """Get current aggregation status and lab contributions"""
     try:
-        # Get latest global model
         global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(1).execute()
-        
         latest_global = global_model_result.data[0] if global_model_result.data else None
-        
-        # Get all labs' latest updates
-        client_updates = sb().table('fl_client_updates').select('*').order('created_at', desc=True).execute()
-        
-        # Group by lab to get latest update per lab
+
+        client_updates = sb().table('fl_client_updates').select('*').not_.is_('storage_path', 'null').order('created_at', desc=True).execute()
+
         lab_status = {}
         if client_updates.data:
             for update in client_updates.data:
                 lab = update.get('client_label', 'unknown')
                 if lab not in lab_status:
+                    agreement_info = get_lab_agreement_rate(lab)
                     lab_status[lab] = {
                         'lab': lab,
                         'last_update': update['created_at'],
-                        'local_accuracy': update.get('local_accuracy') or 0,
+                        'local_test_accuracy': update.get('local_accuracy'),
+                        'local_accuracy': update.get('local_accuracy'),
                         'num_examples': update.get('num_examples') or 0,
-                        'has_model': update.get('storage_path') is not None,
-                        'ready_for_aggregation': update.get('storage_path') is not None
+                        'effective_samples': (update.get('num_examples') or 0) * (1.5 if agreement_info.get('total', 0) > 0 and agreement_info.get('rate', 0) >= 0.8 else 1.0),
+                        'approval_rate': agreement_info.get('rate'),
+                        'has_model': True,
+                        'ready_for_aggregation': update.get('aggregated_in_round') is None,
                     }
-        
-        # Get recent round metrics for history
+
         round_metrics = sb().table('fl_round_metrics').select('*').order('round', desc=True).limit(10).execute()
-        
-        # Calculate total samples from lab statuses (handle None values)
         total_samples = sum((lab.get('num_examples') or 0) for lab in lab_status.values())
         num_labs_with_models = sum(1 for lab in lab_status.values() if lab['has_model'])
-        
+
         return jsonify({
             'current_global_model': {
                 'version': latest_global['version'] if latest_global else 0,
                 'model_type': latest_global.get('model_type') if latest_global else None,
                 'created_at': latest_global.get('created_at') if latest_global else None,
                 'num_labs_contributed': num_labs_with_models,
-                'total_samples': total_samples
+                'total_samples': total_samples,
+                'global_validation_accuracy': round_metrics.data[0].get('global_accuracy') if round_metrics.data else None,
             },
             'labs': list(lab_status.values()),
             'recent_rounds': round_metrics.data if round_metrics.data else [],
             'total_labs': len(lab_status),
-            'ready_labs': sum(1 for lab in lab_status.values() if lab['ready_for_aggregation'])
+            'ready_labs': sum(1 for lab in lab_status.values() if lab['ready_for_aggregation']),
         })
     except Exception as e:
         print(f"Error in get_aggregation_status: {e}")
@@ -1892,8 +1747,7 @@ def get_aggregation_status():
 @app.get("/admin/round_metrics")
 def get_round_metrics():
     """
-    Get accuracy metrics for all aggregation rounds.
-    Used to display accuracy-over-rounds chart in Admin dashboard.
+    Get Global Validation Accuracy metrics for all aggregation rounds.
     """
     try:
         # Get all round metrics ordered by round (most recent first)
@@ -1907,6 +1761,7 @@ def get_round_metrics():
                 metrics.append({
                     'round': metric.get('round'),
                     'global_accuracy': metric.get('global_accuracy'),
+                    'global_validation_accuracy': metric.get('global_accuracy'),
                     'created_at': metric.get('created_at')
                 })
         
@@ -1914,6 +1769,28 @@ def get_round_metrics():
     except Exception as e:
         print(f"Error in get_round_metrics: {e}")
         return jsonify({'error': str(e), 'metrics': []}), 500
+
+
+@app.get("/admin/encryption_status")
+def get_encryption_status():
+    """
+    Get homomorphic encryption configuration and status.
+    Returns information about the HE scheme used to protect model updates.
+    """
+    try:
+        stats = get_he_stats()
+        return jsonify({
+            'encryption_enabled': True,
+            'scheme': stats['scheme'],
+            'poly_modulus_degree': stats['poly_modulus_degree'],
+            'coeff_mod_bit_sizes': stats['coeff_mod_bit_sizes'],
+            'global_scale': stats['global_scale'],
+            'context_version': stats['context_version'],
+            'message': 'All FL model weights are protected with TenSEAL CKKS ciphertexts during aggregation'
+        })
+    except Exception as e:
+        print(f"Error getting encryption status: {e}")
+        return jsonify({'encryption_enabled': False, 'error': str(e)}), 500
 
 
 @app.get("/lab/get_global_model_info")
@@ -1924,54 +1801,48 @@ def get_global_model_info():
     """
     try:
         body = request.args
-        lab_label = body.get('lab_label', 'unknown')
-        
-        # Get latest global model
+        lab_label = normalize_lab_label(body.get('lab_label', 'unknown'))
+
         global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(1).execute()
-        
         if not global_model_result.data:
             return jsonify({
                 'available': False,
                 'message': 'No global model available yet'
             })
-        
         latest_global = global_model_result.data[0]
-        
-        # Check if lab has downloaded this version (table might not exist yet)
+
         has_downloaded = False
         try:
             download_check = sb().table('fl_model_downloads').select('*').eq('lab_label', lab_label).eq('global_model_version', latest_global['version']).execute()
             has_downloaded = len(download_check.data) > 0 if download_check.data else False
         except Exception as e:
             print(f"fl_model_downloads table not found (optional): {e}")
-            # Table doesn't exist yet - that's okay, feature still works without tracking
-        
-        # Get lab's current local model info from last update
+
         lab_update = sb().table('fl_client_updates').select('*').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
-        
         local_version = None
-        local_accuracy = None
+        local_test_accuracy = None
         if lab_update.data:
-            local_accuracy = lab_update.data[0].get('local_accuracy')
-            # Estimate local version from creation time
+            local_test_accuracy = lab_update.data[0].get('local_accuracy')
             local_version = lab_update.data[0].get('round', 0)
-        
-        # Get the lab's current node accuracy (single number for this lab)
-        node_accuracy = get_lab_node_accuracy(lab_label)
-        
+
+        latest_round = sb().table('fl_round_metrics').select('*').order('round', desc=True).limit(1).execute()
+        current_global_validation_accuracy = latest_round.data[0].get('global_accuracy') if latest_round.data else None
+
         return jsonify({
             'available': True,
             'global_model': {
                 'version': latest_global['version'],
                 'model_type': latest_global.get('model_type'),
                 'created_at': latest_global.get('created_at'),
-                'storage_path': latest_global.get('storage_path')
+                'storage_path': latest_global.get('storage_path'),
+                'global_validation_accuracy': current_global_validation_accuracy,
             },
             'local_model': {
                 'version': local_version,
-                'accuracy': local_accuracy
+                'local_test_accuracy': local_test_accuracy,
+                'accuracy': local_test_accuracy,
             },
-            'node_accuracy': node_accuracy,  # Single accuracy for this lab
+            'local_test_accuracy': local_test_accuracy,
             'needs_update': not has_downloaded,
             'has_downloaded': has_downloaded
         })
@@ -1986,16 +1857,7 @@ def get_global_model_info():
 @app.get("/lab/get_node_accuracy")
 def get_node_accuracy():
     """
-    Get the current node accuracy for a lab.
-    
-    Returns a single accuracy number that represents how good this lab's
-    current model is overall, evaluated on the shared test set.
-    
-    This accuracy updates when:
-    1. Lab sends a model update (accuracy of trained model on test set)
-    2. Lab downloads a global model (accuracy of global model on test set)
-    
-    The prediction screen uses this to show "Model accuracy: X%"
+    Backward-compatible endpoint for the lab's current Local Test Accuracy.
     """
     try:
         raw_lab_label = request.args.get('lab_label', 'unknown')
@@ -2013,6 +1875,7 @@ def get_node_accuracy():
         return jsonify({
             'lab_label': lab_label,
             'node_accuracy': node_accuracy,
+            'local_test_accuracy': node_accuracy,
             'node_accuracy_percent': f"{node_accuracy * 100:.1f}%"
         })
         
@@ -2029,7 +1892,7 @@ def get_current_model_info():
     Returns:
     - current_model_type: 'global', 'local', 'baseline', or 'none'
     - current_model_version: Version number if using global model
-    - current_model_accuracy: Accuracy on shared test set (0.0 to 1.0)
+    - current_model_accuracy: Local Test Accuracy (0.0 to 1.0)
     - last_updated: When the model was last updated
     
     This endpoint should be called:
@@ -2041,18 +1904,12 @@ def get_current_model_info():
         raw_lab_label = request.args.get('lab_label', 'unknown')
         lab_label = normalize_lab_label(raw_lab_label)
         
-        # Get the current model and its source
         model, model_source = get_lab_current_model(lab_label)
-        
-        # Get node accuracy
         node_accuracy = get_lab_node_accuracy(lab_label)
-        
-        # Get version info if using global model
+
         model_version = None
         last_updated = None
-        
         if model_source == 'global':
-            # Get the global model version from downloads
             try:
                 downloads = sb().table('fl_model_downloads').select('global_model_version, downloaded_at').eq('lab_label', lab_label).order('downloaded_at', desc=True).limit(1).execute()
                 if downloads.data:
@@ -2061,20 +1918,20 @@ def get_current_model_info():
             except Exception:
                 pass
         elif model_source == 'local':
-            # Get the training info
             try:
-                updates = sb().table('fl_client_updates').select('model_version, created_at').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
+                updates = sb().table('fl_client_updates').select('round, created_at').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
                 if updates.data:
-                    model_version = updates.data[0].get('model_version')
+                    model_version = updates.data[0].get('round')
                     last_updated = updates.data[0].get('created_at')
             except Exception:
                 pass
-        
+
         return jsonify({
             'lab_label': lab_label,
             'current_model_type': model_source or 'none',
             'current_model_version': model_version,
             'current_model_accuracy': node_accuracy,
+            'local_test_accuracy': node_accuracy,
             'current_model_accuracy_percent': f"{node_accuracy * 100:.1f}%" if node_accuracy else None,
             'last_updated': last_updated,
             'has_model': model is not None
@@ -2090,118 +1947,117 @@ def get_current_model_info():
 @app.post("/lab/download_global_model")
 def download_global_model():
     """
-    Download the latest global model
-    Returns signed URL for model download and tracks the download
+    Distribute the latest global weights to a lab and re-evaluate on its local test split.
     """
     try:
         body = request.get_json(force=True) or {}
         raw_lab_label = body.get('lab_label', 'unknown')
-        # Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
-        import re
-        lab_label = str(raw_lab_label)
-        # Convert 'Lab X' pattern to 'lab_X'
-        lab_label = re.sub(r'^Lab\s+', 'lab_', lab_label, flags=re.IGNORECASE)
-        # Replace remaining spaces with underscores
-        lab_label = re.sub(r'\s+', '_', lab_label)
-        # Remove any other special characters
-        lab_label = re.sub(r'[^a-zA-Z0-9_]', '', lab_label)
+        lab_label = normalize_lab_label(raw_lab_label)
         
         print(f"Lab {lab_label} requesting global model download")
         
-        # Get lab's current accuracy before download
         lab_update = sb().table('fl_client_updates').select('*').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
         accuracy_before = lab_update.data[0].get('local_accuracy') if lab_update.data else None
-        
-        # Get latest global model
         global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(1).execute()
-        
         if not global_model_result.data:
             return jsonify({'error': 'No global model available yet'}), 404
-        
         latest_global = global_model_result.data[0]
         storage_path = latest_global.get('storage_path')
-        
         if not storage_path:
             return jsonify({'error': 'Global model storage path not found'}), 404
-        
-        # Download the model from Supabase Storage
+
         try:
             storage_client = sb().storage.from_('models')
-            model_data = storage_client.download(storage_path)
-            
-            # Save to local temp file
+            encrypted_payload_bytes = storage_client.download(storage_path)
+            decrypted_payload = decrypt_weight_payload_for_lab(encrypted_payload_bytes, lab_label=lab_label)
+
+            model = create_fl_logistic_model(int(decrypted_payload['weight_metadata']['n_features_in']))
+            model = apply_flat_weights_to_model(
+                model,
+                decrypted_payload['flat_weights'],
+                decrypted_payload['weight_metadata'],
+            )
+
             timestamp = int(time.time())
             local_model_path = os.path.join(os.path.dirname(__file__), 'models', f'global_downloaded_{lab_label}_{timestamp}.pkl')
-            
             with open(local_model_path, 'wb') as f:
-                f.write(model_data)
-            
-            print(f"Global model downloaded to: {local_model_path}")
-            
-            # Load the model to get metadata
-            with open(local_model_path, 'rb') as f:
-                model = pickle.load(f)
-                model_type = type(model).__name__
-            
-            # Evaluate the downloaded global model on the shared test set
-            # This becomes the lab's new node accuracy
-            node_accuracy = evaluate_model_on_test_set(model, model_type='tree')
-            if node_accuracy is not None:
-                print(f"Downloaded global model evaluated on test set: {node_accuracy:.1%} accuracy")
-            else:
-                # Fallback to the global accuracy from round metrics
-                round_metrics = sb().table('fl_round_metrics').select('*').eq('round', latest_global['version']).execute()
-                node_accuracy = round_metrics.data[0].get('average_accuracy') if round_metrics.data else None
-                print(f"Using global model's stored accuracy: {node_accuracy}")
-            
-            # Update the lab's node accuracy in fl_client_updates so it's used consistently
-            # This ensures get_lab_node_accuracy returns the correct value
-            if node_accuracy is not None:
-                try:
-                    # Insert a new record with the new accuracy from global model
-                    # This way get_lab_node_accuracy will pick up the most recent one
-                    # Only include columns that exist in the table
-                    sb().table('fl_client_updates').insert({
-                        'client_label': lab_label,
-                        'local_accuracy': node_accuracy,
-                        'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                    }).execute()
-                    print(f"Updated {lab_label} node accuracy to {node_accuracy:.1%} after global model download")
-                except Exception as acc_err:
-                    print(f"Warning: Could not update node accuracy in fl_client_updates: {acc_err}")
-            
-            # Track the download with performance metrics
+                pickle.dump(model, f)
+            print(f"Encrypted global weights decrypted for {lab_label} and saved to: {local_model_path}")
+
+            approximation_error = approximation_error_for_lab(lab_label)
+            print(f"Round approximation error: {approximation_error}")
+            if approximation_error > 1e-4:
+                print("WARNING: CKKS approximation error exceeded 1e-4")
+
+            X_train_raw, X_test_raw, _, y_test = get_lab_dataset_split(lab_label)
+            X_test = ensure_features_for_model(X_test_raw, model)
+            local_test_accuracy = evaluate_model_accuracy(model, X_test, y_test)
+            if local_test_accuracy is None:
+                return jsonify({'error': 'Failed to re-evaluate downloaded global weights on the lab test split'}), 500
+
+            try:
+                last_round = sb().table('fl_client_updates').select('round').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
+                round_num = int(last_round.data[0]['round']) + 1 if last_round.data else latest_global['version']
+            except Exception:
+                round_num = latest_global['version']
+
+            try:
+                sb().table('fl_client_updates').insert({
+                    'client_label': lab_label,
+                    'local_accuracy': local_test_accuracy,
+                    'num_examples': int(X_train_raw.shape[0]),
+                    'round': round_num,
+                    'storage_path': storage_path,
+                    'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
+                }).execute()
+                print(f"Updated {lab_label} Local Test Accuracy to {local_test_accuracy:.1%} after distributing global weights")
+            except Exception as acc_err:
+                print(f"Warning: Could not update Local Test Accuracy in fl_client_updates: {acc_err}")
+
             try:
                 download_record = {
                     'lab_label': lab_label,
                     'global_model_version': latest_global['version'],
                     'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                    'accuracy_before_download': accuracy_before
+                    'accuracy_before_download': accuracy_before,
+                    'accuracy_after_download': local_test_accuracy,
+                    'node_accuracy': local_test_accuracy,
                 }
-                
-                # Use upsert to avoid duplicate key constraint violations
                 sb().table('fl_model_downloads').upsert(
                     download_record, 
                     on_conflict='lab_label,global_model_version'
                 ).execute()
                 print(f"Download tracked for {lab_label}, version {latest_global['version']}")
-                if accuracy_before and node_accuracy:
-                    improvement = ((node_accuracy - accuracy_before) / accuracy_before) * 100
-                    print(f"  Node accuracy improvement: {accuracy_before:.1%} → {node_accuracy:.1%} ({improvement:+.2f}%)")
+                if accuracy_before and local_test_accuracy:
+                    improvement = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100
+                    print(f"  Local Test Accuracy improvement: {accuracy_before:.1%} → {local_test_accuracy:.1%} ({improvement:+.2f}%)")
             except Exception as track_error:
                 print(f"Warning: Could not track download: {track_error}")
-                # Continue even if tracking fails
-            
+
             improvement_metrics = None
-            if accuracy_before and node_accuracy:
-                improvement = ((node_accuracy - accuracy_before) / accuracy_before) * 100
+            if accuracy_before and local_test_accuracy:
+                improvement = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100
                 improvement_metrics = {
                     'accuracy_before': accuracy_before,
-                    'accuracy_after': node_accuracy,
+                    'accuracy_after': local_test_accuracy,
                     'improvement_percentage': round(improvement, 2),
-                    'absolute_improvement': round(node_accuracy - accuracy_before, 4)
+                    'absolute_improvement': round(local_test_accuracy - accuracy_before, 4)
                 }
-            
+
+            round_metric = sb().table('fl_round_metrics').select('global_accuracy').eq('round', latest_global['version']).limit(1).execute()
+            global_validation_accuracy = round_metric.data[0].get('global_accuracy') if round_metric.data else None
+            if global_validation_accuracy is None:
+                X_val, y_val = load_validation_dataset()
+                if X_val is not None and y_val is not None:
+                    X_val = ensure_features_for_model(X_val, model)
+                    global_validation_accuracy = evaluate_model_accuracy(model, X_val, y_val)
+                    try:
+                        sb().table('fl_round_metrics').update({
+                            'global_accuracy': global_validation_accuracy
+                        }).eq('round', latest_global['version']).execute()
+                    except Exception as metric_err:
+                        print(f"Warning: unable to persist lab-reported Global Validation Accuracy: {metric_err}")
+
             return jsonify({
                 'success': True,
                 'global_model': {
@@ -2210,13 +2066,14 @@ def download_global_model():
                     'created_at': latest_global.get('created_at'),
                     'storage_path': storage_path,
                     'local_path': local_model_path,
-                    'accuracy': node_accuracy
+                    'global_validation_accuracy': global_validation_accuracy,
                 },
-                'node_accuracy': node_accuracy,  # Lab's new node accuracy after download
+                'local_test_accuracy': local_test_accuracy,
+                'node_accuracy': local_test_accuracy,
                 'improvement_metrics': improvement_metrics,
-                'message': f'Global model v{latest_global["version"]} downloaded successfully'
+                'approximation_error': approximation_error,
+                'message': f'Global weights v{latest_global["version"]} distributed successfully'
             })
-            
         except Exception as download_error:
             print(f"Error downloading model from storage: {download_error}")
             return jsonify({'error': f'Failed to download model: {str(download_error)}'}), 500

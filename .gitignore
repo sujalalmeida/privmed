@@ -24,3 +24,6 @@ dist-ssr
 
 .venv/
 venv/
+server/.venv/
+server/venv/
+env/

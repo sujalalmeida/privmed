@@ -207,7 +207,7 @@ export default function RoundHistory() {
                   return (
                     <div className="card p-3 text-sm">
                       <p className="font-medium text-neutral-900">Round {data.round}</p>
-                      <p className="text-success-500">Accuracy: {data.accuracy}%</p>
+                      <p className="text-success-500">Global Validation Accuracy: {data.accuracy}%</p>
                       <p className="text-primary-500">Labs: {data.labs}</p>
                       <p className="text-warning-500">Samples: {data.samples}</p>
                     </div>
@@ -223,7 +223,7 @@ export default function RoundHistory() {
               stroke="#0F6E66" 
               strokeWidth={2}
               dot={{ fill: '#0F6E66', r: 4 }}
-              name="Global Accuracy (%)"
+              name="Global Validation Accuracy (%)"
             />
           </LineChart>
         </ResponsiveContainer>
@@ -245,7 +245,7 @@ export default function RoundHistory() {
                   Timestamp
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wide">
-                  Global Accuracy
+                  Global Validation Accuracy
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wide">
                   Labs Participated

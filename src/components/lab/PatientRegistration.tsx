@@ -29,7 +29,12 @@ export default function PatientRegistration({
 }: PatientRegistrationProps) {
   return (
     <div className="clinical-section">
-      <h3>Patient Registration</h3>
+      <h3 className="flex items-center gap-2">
+        <span>Patient Registration</span>
+        <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Homomorphically Encrypted
+        </span>
+      </h3>
       
       <div className="form-row">
         <label>Patient ID</label>

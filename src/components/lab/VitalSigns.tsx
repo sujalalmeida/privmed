@@ -23,7 +23,12 @@ export default function VitalSigns({
 }: VitalSignsProps) {
   return (
     <div className="clinical-section vital-signs">
-      <h3>Vital Signs</h3>
+      <h3 className="flex items-center gap-2">
+        <span>Vital Signs</span>
+        <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Homomorphically Encrypted
+        </span>
+      </h3>
       
       <div className="form-row">
         <label>Blood Pressure</label>

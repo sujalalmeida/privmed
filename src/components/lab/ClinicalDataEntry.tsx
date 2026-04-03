@@ -30,15 +30,6 @@ interface PredictionResult {
   };
 }
 
-interface ModelInfo {
-  current_model_type: 'global' | 'local' | 'baseline' | 'none';
-  current_model_version: number | null;
-  current_model_accuracy: number | null;
-  current_model_accuracy_percent: string | null;
-  last_updated: string | null;
-  has_model: boolean;
-}
-
 export default function ClinicalDataEntry() {
   const { user } = useAuth();
   const [serverUrl, setServerUrl] = useState('http://127.0.0.1:5001');
@@ -46,8 +37,6 @@ export default function ClinicalDataEntry() {
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [nodeAccuracy, setNodeAccuracy] = useState<number | null>(null);
-  const [modelInfo, setModelInfo] = useState<ModelInfo | null>(null);
   
   // Generate unique patient ID
   const generatePatientId = () => {
@@ -115,44 +104,6 @@ export default function ClinicalDataEntry() {
   const glucoseStatus = useMemo(() => getGlucoseStatus(fastingGlucose), [fastingGlucose]);
   const hba1cStatus = useMemo(() => getHba1cStatus(hba1c), [hba1c]);
   const cholesterolStatus = useMemo(() => getCholesterolStatus(totalCholesterol), [totalCholesterol]);
-  
-  // Fetch node accuracy on component mount
-  useEffect(() => {
-    const fetchModelInfo = async () => {
-      try {
-        const labLabel = user?.labName || 'Lab A';
-        const response = await fetch(`${serverUrl}/lab/get_current_model_info?lab_label=${encodeURIComponent(labLabel)}`);
-        if (response.ok) {
-          const data = await response.json();
-          setModelInfo(data);
-          if (data.current_model_accuracy !== null) {
-            setNodeAccuracy(data.current_model_accuracy);
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching model info:', err);
-      }
-    };
-    fetchModelInfo();
-  }, [user, serverUrl]);
-  
-  // Function to refresh model info (call after prediction, download, etc.)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const refreshModelInfo = async () => {
-    try {
-      const labLabel = user?.labName || 'Lab A';
-      const response = await fetch(`${serverUrl}/lab/get_current_model_info?lab_label=${encodeURIComponent(labLabel)}`);
-      if (response.ok) {
-        const data = await response.json();
-        setModelInfo(data);
-        if (data.current_model_accuracy !== null) {
-          setNodeAccuracy(data.current_model_accuracy);
-        }
-      }
-    } catch (err) {
-      console.error('Error refreshing model info:', err);
-    }
-  };
   
   // Update max heart rate when age changes
   useEffect(() => {
@@ -246,11 +197,6 @@ export default function ClinicalDataEntry() {
       };
       
       setResult(predictionResult);
-      
-      // Update node accuracy from response if provided
-      if (data.node_accuracy !== null && data.node_accuracy !== undefined) {
-        setNodeAccuracy(data.node_accuracy);
-      }
 
       // Backend /submit now persists to patient_records (Option B); no direct frontend insert.
       const modelSource = data.model_source || 'unknown';
@@ -474,9 +420,7 @@ export default function ClinicalDataEntry() {
       <div className="mt-8">
         <DiagnosisResult 
           result={result} 
-          isLoading={isSubmitting} 
-          nodeAccuracy={nodeAccuracy} 
-          modelInfo={modelInfo}
+          isLoading={isSubmitting}
         />
       </div>
     </div>

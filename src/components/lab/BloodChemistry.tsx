@@ -43,7 +43,12 @@ export default function BloodChemistry({
 }: BloodChemistryProps) {
   return (
     <div className="clinical-section blood-chemistry">
-      <h3>Blood Chemistry</h3>
+      <h3 className="flex items-center gap-2">
+        <span>Blood Chemistry</span>
+        <span className="text-xs font-medium px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+          Homomorphically Encrypted
+        </span>
+      </h3>
       
       <h4 className="subsection-title">Glucose Metabolism</h4>
       

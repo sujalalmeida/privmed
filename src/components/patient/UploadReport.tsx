@@ -97,14 +97,14 @@ export default function UploadReport() {
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-800">
-              Your report will be encrypted using homomorphic encryption before upload to ensure complete privacy.
+              Uploaded files use standard encryption at rest and TLS in transit. Homomorphic encryption is only applied to structured numerical clinical fields.
             </p>
           </div>
 
           {uploadSuccess && (
             <div className="flex items-center p-4 bg-green-50 border border-green-200 rounded-lg text-green-800">
               <CheckCircle className="w-5 h-5 mr-2" />
-              <span className="text-sm font-medium">Report encrypted and uploaded successfully!</span>
+              <span className="text-sm font-medium">Report uploaded securely.</span>
             </div>
           )}
 
@@ -113,7 +113,7 @@ export default function UploadReport() {
             disabled={!file || isUploading}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-medium"
           >
-            {isUploading ? 'Encrypting & Uploading...' : 'Encrypt and Upload Report'}
+            {isUploading ? 'Uploading Securely...' : 'Upload Report'}
           </button>
         </form>
       </div>

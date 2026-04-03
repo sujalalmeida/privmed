@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { getModelUpdatesByLab, addModelUpdate, getAllModelUpdates } from '../../utils/mockData';
+import { supabase } from '../../lib/supabase';
 import { Brain, Upload, TrendingUp, CheckCircle, Download, RefreshCw, AlertCircle, Bell, BellOff } from 'lucide-react';
 
 interface GlobalModelInfo {
@@ -9,11 +9,14 @@ interface GlobalModelInfo {
     version: number;
     model_type: string;
     created_at: string;
+    global_validation_accuracy?: number | null;
   };
   local_model?: {
     version: number | null;
+    local_test_accuracy: number | null;
     accuracy: number | null;
   };
+  local_test_accuracy?: number | null;
   needs_update: boolean;
   has_downloaded: boolean;
 }
@@ -23,6 +26,15 @@ interface ImprovementMetrics {
   accuracy_after: number;
   improvement_percentage: number;
   absolute_improvement: number;
+}
+
+interface ClientUpdate {
+  id: string;
+  created_at: string;
+  round: number;
+  local_accuracy: number | null;
+  num_examples: number | null;
+  aggregated_in_round: number | null;
 }
 
 export default function FederatedLearning() {
@@ -44,15 +56,33 @@ export default function FederatedLearning() {
   const [isTogglingAutoSync, setIsTogglingAutoSync] = useState(false);
   const [pendingUpdate, setPendingUpdate] = useState<{ version: number; broadcast_id: string } | null>(null);
   const [showUpdateNotification, setShowUpdateNotification] = useState(false);
+  const [labUpdates, setLabUpdates] = useState<ClientUpdate[]>([]);
   
   const serverUrl = 'http://localhost:5001';
+  const latestLocalTestAccuracy = labUpdates[0]?.local_accuracy ?? globalModelInfo?.local_test_accuracy ?? null;
+  const latestGlobalValidationAccuracy = globalModelInfo?.global_model?.global_validation_accuracy ?? null;
 
-  const labUpdates = user ? getModelUpdatesByLab(user.id) : [];
-  const allUpdates = getAllModelUpdates();
-  const aggregatedUpdates = allUpdates.filter(u => u.isAggregated);
-  const latestGlobalAccuracy = aggregatedUpdates.length > 0
-    ? Math.max(...aggregatedUpdates.map(u => u.accuracy))
-    : 0;
+  const normalizedLabLabel = (user?.labName || user?.email || 'lab_sim')
+    .replace(/^Lab\s+/i, 'lab_')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_]/g, '');
+
+  const loadLabUpdates = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('fl_client_updates')
+        .select('id, created_at, round, local_accuracy, num_examples, aggregated_in_round')
+        .eq('client_label', normalizedLabLabel)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+      setLabUpdates((data || []) as ClientUpdate[]);
+    } catch (error) {
+      console.error('Error loading lab updates:', error);
+    }
+  };
 
   // Check for global model updates
   const checkGlobalModel = async () => {
@@ -60,8 +90,7 @@ export default function FederatedLearning() {
     
     setIsCheckingGlobal(true);
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
-      const response = await fetch(`${serverUrl}/lab/get_global_model_info?lab_label=${encodeURIComponent(labLabel)}`);
+      const response = await fetch(`${serverUrl}/lab/get_global_model_info?lab_label=${encodeURIComponent(normalizedLabLabel)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -82,17 +111,10 @@ export default function FederatedLearning() {
     setDownloadError(null);
     
     try {
-      // Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
-      const rawLabLabel = user?.labName || user?.email || 'lab_sim';
-      const labLabel = rawLabLabel
-        .replace(/^Lab\s+/i, 'lab_')  // 'Lab A' -> 'lab_A'
-        .replace(/\s+/g, '_')         // Replace remaining spaces with underscores
-        .replace(/[^a-zA-Z0-9_]/g, ''); // Remove special chars
-      
       const response = await fetch(`${serverUrl}/lab/download_global_model`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lab_label: labLabel }),
+        body: JSON.stringify({ lab_label: normalizedLabLabel }),
       });
       
       if (!response.ok) {
@@ -118,12 +140,11 @@ export default function FederatedLearning() {
       
       // Acknowledge download to server if there was a broadcast
       if (pendingUpdate?.broadcast_id) {
-        const labLabel = user?.labName || user?.email || 'lab_sim';
         await fetch(`${serverUrl}/lab/acknowledge_download`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            lab_label: labLabel, 
+            lab_label: normalizedLabLabel, 
             broadcast_id: pendingUpdate.broadcast_id 
           }),
         });
@@ -131,6 +152,7 @@ export default function FederatedLearning() {
       
       // Refresh global model info
       checkGlobalModel();
+      loadLabUpdates();
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'Failed to download global model');
       setTimeout(() => setDownloadError(null), 5000);
@@ -145,13 +167,12 @@ export default function FederatedLearning() {
     
     setIsTogglingAutoSync(true);
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
       const newValue = !autoSyncEnabled;
       
       const response = await fetch(`${serverUrl}/lab/enable_auto_sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lab_label: labLabel, enabled: newValue }),
+        body: JSON.stringify({ lab_label: normalizedLabLabel, enabled: newValue }),
       });
       
       if (response.ok) {
@@ -169,8 +190,7 @@ export default function FederatedLearning() {
     if (!user) return;
     
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
-      const response = await fetch(`${serverUrl}/lab/check_for_updates?lab_label=${encodeURIComponent(labLabel)}`);
+      const response = await fetch(`${serverUrl}/lab/check_for_updates?lab_label=${encodeURIComponent(normalizedLabLabel)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -194,8 +214,7 @@ export default function FederatedLearning() {
     if (!user) return;
     
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
-      const response = await fetch(`${serverUrl}/lab/get_auto_sync_status?lab_label=${encodeURIComponent(labLabel)}`);
+      const response = await fetch(`${serverUrl}/lab/get_auto_sync_status?lab_label=${encodeURIComponent(normalizedLabLabel)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -211,6 +230,7 @@ export default function FederatedLearning() {
     checkGlobalModel();
     loadAutoSyncStatus();
     checkForPushedUpdates();
+    loadLabUpdates();
     
     const interval = setInterval(() => {
       checkGlobalModel();
@@ -227,20 +247,13 @@ export default function FederatedLearning() {
     setSendError(null);
 
     try {
-      // Normalize lab label: 'Lab A' -> 'lab_A', 'Lab B' -> 'lab_B'
-      const rawLabLabel = user?.labName || user?.email || 'lab_sim';
-      const labLabel = rawLabLabel
-        .replace(/^Lab\s+/i, 'lab_')  // 'Lab A' -> 'lab_A'
-        .replace(/\s+/g, '_')         // Replace remaining spaces with underscores
-        .replace(/[^a-zA-Z0-9_]/g, ''); // Remove special chars
-
       const response = await fetch('http://127.0.0.1:5001/lab/send_model_update', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          lab_label: labLabel,
+          lab_label: normalizedLabLabel,
         }),
       });
 
@@ -250,19 +263,11 @@ export default function FederatedLearning() {
       }
 
       const data = await response.json();
-      
-      // Add to mock data for UI display
-      const version = `v1.2.${labUpdates.length + 1}`;
-      addModelUpdate({
-        labId: user.id,
-        labName: user.labName || 'Lab',
-        modelVersion: version,
-        accuracy: data.local_accuracy || 0.92,
-        isAggregated: false,
-      });
 
       setSendSuccess(true);
       setTimeout(() => setSendSuccess(false), 3000);
+      checkGlobalModel();
+      loadLabUpdates();
     } catch (error) {
       setSendError(error instanceof Error ? error.message : 'Failed to send model update');
       setTimeout(() => setSendError(null), 5000);
@@ -290,10 +295,10 @@ export default function FederatedLearning() {
         <div className="card p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-neutral-500">Latest Local Accuracy</p>
+              <p className="text-sm font-medium text-neutral-500">Latest Local Test Accuracy</p>
               <p className="text-2xl font-semibold text-success-500 mt-1">
-                {labUpdates.length > 0
-                  ? `${(labUpdates[labUpdates.length - 1].accuracy * 100).toFixed(1)}%`
+                {latestLocalTestAccuracy !== null
+                  ? `${(latestLocalTestAccuracy * 100).toFixed(1)}%`
                   : 'N/A'}
               </p>
             </div>
@@ -306,10 +311,10 @@ export default function FederatedLearning() {
         <div className="card p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-neutral-500">Global Model Accuracy</p>
+              <p className="text-sm font-medium text-neutral-500">Global Validation Accuracy</p>
               <p className="text-2xl font-semibold text-primary-500 mt-1">
-                {latestGlobalAccuracy > 0
-                  ? `${(latestGlobalAccuracy * 100).toFixed(1)}%`
+                {latestGlobalValidationAccuracy !== null
+                  ? `${(latestGlobalValidationAccuracy * 100).toFixed(1)}%`
                   : 'N/A'}
               </p>
             </div>
@@ -327,7 +332,7 @@ export default function FederatedLearning() {
             <div className="flex items-center">
               <Bell className="w-5 h-5 mr-3" />
               <div>
-                <p className="font-semibold text-sm">New Global Model Available</p>
+                <p className="font-semibold text-sm">New Global Weights Available</p>
                 <p className="text-xs text-primary-100 mt-0.5">Version {pendingUpdate.version} is ready</p>
               </div>
             </div>
@@ -406,7 +411,7 @@ export default function FederatedLearning() {
                 Global Model Available
               </h3>
               <p className="text-sm text-neutral-600">
-                Download the latest aggregated model trained on data from all participating labs
+                Download the latest global weights and replace your local model before re-evaluating on your lab test split
               </p>
             </div>
             {globalModelInfo.needs_update && (
@@ -418,7 +423,7 @@ export default function FederatedLearning() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div className="bg-white rounded-lg p-4 border border-neutral-200">
-              <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">Global Model</h4>
+              <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-2">Global Weights</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-neutral-600">Version:</span>
@@ -427,6 +432,14 @@ export default function FederatedLearning() {
                 <div className="flex justify-between">
                   <span className="text-neutral-600">Model Type:</span>
                   <span className="font-medium text-neutral-900">{globalModelInfo.global_model?.model_type}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-neutral-600">Global Validation Accuracy:</span>
+                  <span className="font-medium text-primary-500">
+                    {globalModelInfo.global_model?.global_validation_accuracy !== null && globalModelInfo.global_model?.global_validation_accuracy !== undefined
+                      ? `${(globalModelInfo.global_model.global_validation_accuracy * 100).toFixed(1)}%`
+                      : 'N/A'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-neutral-600">Created:</span>
@@ -443,10 +456,10 @@ export default function FederatedLearning() {
                   <span className="font-medium text-neutral-900">{globalModelInfo.local_model?.version ? `v${globalModelInfo.local_model.version}` : 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-neutral-600">Accuracy:</span>
+                  <span className="text-neutral-600">Local Test Accuracy:</span>
                   <span className="font-medium text-success-500">
-                    {globalModelInfo.local_model?.accuracy 
-                      ? `${(globalModelInfo.local_model.accuracy * 100).toFixed(1)}%`
+                    {globalModelInfo.local_model?.local_test_accuracy !== null && globalModelInfo.local_model?.local_test_accuracy !== undefined
+                      ? `${(globalModelInfo.local_model.local_test_accuracy * 100).toFixed(1)}%`
                       : 'N/A'}
                   </span>
                 </div>
@@ -464,19 +477,19 @@ export default function FederatedLearning() {
             <div className="alert-success mb-4">
               <div className="flex items-center text-success-600 font-medium mb-2">
                 <CheckCircle className="w-4 h-4 mr-2" />
-                Global model downloaded successfully!
+                Global weights distributed successfully!
               </div>
               
               {improvementMetrics && (
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div className="bg-white rounded-md p-3 border border-neutral-200">
-                    <p className="text-xs text-neutral-500 mb-1">Previous Accuracy</p>
+                    <p className="text-xs text-neutral-500 mb-1">Previous Local Test Accuracy</p>
                     <p className="text-lg font-semibold text-neutral-900">
                       {(improvementMetrics.accuracy_before * 100).toFixed(2)}%
                     </p>
                   </div>
                   <div className="bg-white rounded-md p-3 border border-neutral-200">
-                    <p className="text-xs text-neutral-500 mb-1">New Accuracy</p>
+                    <p className="text-xs text-neutral-500 mb-1">New Local Test Accuracy</p>
                     <p className="text-lg font-semibold text-success-500">
                       {(improvementMetrics.accuracy_after * 100).toFixed(2)}%
                     </p>
@@ -517,7 +530,7 @@ export default function FederatedLearning() {
               className="btn-primary flex-1 justify-center"
             >
               <Download className="w-4 h-4 mr-2" />
-              {isDownloading ? 'Downloading...' : 'Download Global Model'}
+              {isDownloading ? 'Distributing...' : 'Distribute Global Weights To This Lab'}
             </button>
             
             <button
@@ -533,15 +546,28 @@ export default function FederatedLearning() {
 
       <div className="max-w-md mx-auto">
         <div className="card p-6">
-          <h3 className="text-base font-semibold text-neutral-900 mb-2">Send Model Update</h3>
+          <h3 className="text-base font-semibold text-neutral-900 mb-2">Send Weight Update To Global Server</h3>
           <p className="text-sm text-neutral-500 mb-4">
-            Send encrypted model gradients/weights to the central server for federated aggregation. Your local data never leaves the lab.
+            Train for 5 local epochs, evaluate on your held-out 20% lab test split, and send encrypted model weights plus training-split sample count to the global server.
           </p>
+          
+          {/* Homomorphic Encryption Notice */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+            <div className="flex items-start">
+              <svg className="w-4 h-4 text-blue-600 mt-0.5 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              <div>
+                <p className="text-xs font-medium text-blue-800">Homomorphic Encryption Active</p>
+                <p className="text-xs text-blue-600 mt-0.5">Weight updates are encrypted before upload. The server aggregates encrypted weights without accessing your model parameters.</p>
+              </div>
+            </div>
+          </div>
 
           {sendSuccess && (
             <div className="alert-success mb-4">
               <CheckCircle className="w-4 h-4 mr-2 flex-shrink-0" />
-              Model update sent successfully!
+              Weight update sent successfully.
             </div>
           )}
 
@@ -560,14 +586,14 @@ export default function FederatedLearning() {
             className="btn-primary w-full justify-center bg-success-500 hover:bg-success-600"
           >
             <Upload className="w-4 h-4 mr-2" />
-            {isSending ? 'Sending Update...' : 'Send Model Update'}
+            {isSending ? 'Sending Weight Update...' : 'Send Weight Update To Global Server'}
           </button>
         </div>
       </div>
 
       <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-neutral-200">
-          <h3 className="text-base font-semibold text-neutral-900">Model Update History</h3>
+          <h3 className="text-base font-semibold text-neutral-900">Weight Update History</h3>
         </div>
 
         <div className="overflow-x-auto">
@@ -578,7 +604,7 @@ export default function FederatedLearning() {
                   Version
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wide">
-                  Accuracy
+                  Local Test Accuracy
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-neutral-500 uppercase tracking-wide">
                   Status
@@ -593,29 +619,31 @@ export default function FederatedLearning() {
                 <tr>
                   <td colSpan={4} className="px-6 py-12 text-center text-neutral-500">
                     <Brain className="w-10 h-10 text-neutral-300 mx-auto mb-3" />
-                    <p className="text-sm">No model updates yet</p>
+                    <p className="text-sm">No weight updates yet</p>
                   </td>
                 </tr>
               ) : (
                 labUpdates.map((update) => (
                   <tr key={update.id} className="hover:bg-neutral-50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-neutral-900">
-                      {update.modelVersion}
+                      Round {update.round}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-900">
-                      {(update.accuracy * 100).toFixed(1)}%
+                      {update.local_accuracy !== null && update.local_accuracy !== undefined
+                        ? `${(update.local_accuracy * 100).toFixed(1)}%`
+                        : 'N/A'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`badge ${
-                        update.isAggregated
+                        update.aggregated_in_round !== null
                           ? 'badge-success'
                           : 'badge-warning'
                       }`}>
-                        {update.isAggregated ? 'Aggregated' : 'Pending'}
+                        {update.aggregated_in_round !== null ? `Aggregated In Round ${update.aggregated_in_round}` : 'Pending Aggregation'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-500">
-                      {new Date(update.createdAt).toLocaleDateString()}
+                      {new Date(update.created_at).toLocaleDateString()}
                     </td>
                   </tr>
                 ))
