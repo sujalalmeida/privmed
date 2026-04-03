@@ -82,6 +82,8 @@ _client_procs: List[subprocess.Popen] = []
 _current_run_id: Optional[str] = None
 
 LOCAL_EPOCHS = 5
+DOCTOR_APPROVAL_THRESHOLD = 0.8
+DOCTOR_WEIGHT_MULTIPLIER = 1.5
 PATIENT_PREDICTION_MIN_CONFIDENCE = 0.40
 LAB_DATASET_FILES = {
     'lab_A': 'lab_A_data.csv',
@@ -344,6 +346,11 @@ def get_lab_node_accuracy(lab_label: str) -> float | None:
     return None
 
 
+def get_lab_local_test_accuracy(lab_label: str) -> float | None:
+    """Preferred name for the lab-facing Local Test Accuracy lookup."""
+    return get_lab_node_accuracy(lab_label)
+
+
 def set_lab_node_accuracy(lab_label: str, accuracy: float, source: str = 'training') -> bool:
     """
     Update the lab's node accuracy after model training or global model download.
@@ -372,6 +379,11 @@ def set_lab_node_accuracy(lab_label: str, accuracy: float, source: str = 'traini
     except Exception as e:
         print(f"Error setting node accuracy for {lab_label}: {e}")
         return False
+
+
+def set_lab_local_test_accuracy(lab_label: str, accuracy: float, source: str = 'training') -> bool:
+    """Preferred name for lab-facing Local Test Accuracy persistence."""
+    return set_lab_node_accuracy(lab_label, accuracy, source=source)
 
 
 def get_lab_current_model(lab_label: str):
@@ -1517,7 +1529,11 @@ def aggregate_models():
 
                 agreement_info = get_lab_agreement_rate(lab_label)
                 approval_rate = float(agreement_info.get('rate', 0.0))
-                effective_samples = float(num_examples * 1.5) if agreement_info.get('total', 0) > 0 and approval_rate >= 0.8 else float(num_examples)
+                effective_samples = (
+                    float(num_examples * DOCTOR_WEIGHT_MULTIPLIER)
+                    if agreement_info.get('total', 0) > 0 and approval_rate >= DOCTOR_APPROVAL_THRESHOLD
+                    else float(num_examples)
+                )
 
                 models_data.append({
                     'id': update['id'],
@@ -1528,7 +1544,7 @@ def aggregate_models():
                     'local_test_accuracy': update.get('local_accuracy'),
                     'approval_rate': approval_rate,
                     'approval_reviews': agreement_info.get('total', 0),
-                    'doctor_weight_multiplier': 1.5 if effective_samples > num_examples else 1.0,
+                    'doctor_weight_multiplier': DOCTOR_WEIGHT_MULTIPLIER if effective_samples > num_examples else 1.0,
                     'model_features': model_features,
                     'weight_metadata': encrypted_payload["weight_metadata"],
                 })
@@ -1679,7 +1695,10 @@ def aggregate_models():
             },
             'feedback_weighting': {
                 'enabled': True,
-                'message': 'Labs with doctor approval rate >= 80% received a 1.5x FedAvg weight multiplier',
+                'message': (
+                    f'Labs with doctor approval rate >= {DOCTOR_APPROVAL_THRESHOLD * 100:.0f}% '
+                    f'received a {DOCTOR_WEIGHT_MULTIPLIER:.1f}x FedAvg weight multiplier'
+                ),
             },
             'skipped_incompatible_context_labs': skipped_context_labs,
             'round': version,
@@ -1713,7 +1732,11 @@ def get_aggregation_status():
                         'local_test_accuracy': update.get('local_accuracy'),
                         'local_accuracy': update.get('local_accuracy'),
                         'num_examples': update.get('num_examples') or 0,
-                        'effective_samples': (update.get('num_examples') or 0) * (1.5 if agreement_info.get('total', 0) > 0 and agreement_info.get('rate', 0) >= 0.8 else 1.0),
+                        'effective_samples': (update.get('num_examples') or 0) * (
+                            DOCTOR_WEIGHT_MULTIPLIER
+                            if agreement_info.get('total', 0) > 0 and agreement_info.get('rate', 0) >= DOCTOR_APPROVAL_THRESHOLD
+                            else 1.0
+                        ),
                         'approval_rate': agreement_info.get('rate'),
                         'has_model': True,
                         'ready_for_aggregation': update.get('aggregated_in_round') is None,
@@ -1863,20 +1886,22 @@ def get_node_accuracy():
         raw_lab_label = request.args.get('lab_label', 'unknown')
         lab_label = normalize_lab_label(raw_lab_label)
         
-        node_accuracy = get_lab_node_accuracy(lab_label)
-        
-        if node_accuracy is None:
+        local_test_accuracy = get_lab_local_test_accuracy(lab_label)
+
+        if local_test_accuracy is None:
             return jsonify({
                 'lab_label': lab_label,
                 'node_accuracy': None,
+                'local_test_accuracy': None,
                 'message': 'No model trained or downloaded yet for this lab'
             })
         
         return jsonify({
             'lab_label': lab_label,
-            'node_accuracy': node_accuracy,
-            'local_test_accuracy': node_accuracy,
-            'node_accuracy_percent': f"{node_accuracy * 100:.1f}%"
+            'node_accuracy': local_test_accuracy,
+            'local_test_accuracy': local_test_accuracy,
+            'node_accuracy_percent': f"{local_test_accuracy * 100:.1f}%",
+            'local_test_accuracy_percent': f"{local_test_accuracy * 100:.1f}%"
         })
         
     except Exception as e:
@@ -1905,7 +1930,7 @@ def get_current_model_info():
         lab_label = normalize_lab_label(raw_lab_label)
         
         model, model_source = get_lab_current_model(lab_label)
-        node_accuracy = get_lab_node_accuracy(lab_label)
+        local_test_accuracy = get_lab_local_test_accuracy(lab_label)
 
         model_version = None
         last_updated = None
@@ -1930,9 +1955,18 @@ def get_current_model_info():
             'lab_label': lab_label,
             'current_model_type': model_source or 'none',
             'current_model_version': model_version,
-            'current_model_accuracy': node_accuracy,
-            'local_test_accuracy': node_accuracy,
-            'current_model_accuracy_percent': f"{node_accuracy * 100:.1f}%" if node_accuracy else None,
+            'current_model_accuracy': local_test_accuracy,
+            'local_test_accuracy': local_test_accuracy,
+            'current_model_accuracy_percent': (
+                f"{local_test_accuracy * 100:.1f}%"
+                if local_test_accuracy is not None
+                else None
+            ),
+            'local_test_accuracy_percent': (
+                f"{local_test_accuracy * 100:.1f}%"
+                if local_test_accuracy is not None
+                else None
+            ),
             'last_updated': last_updated,
             'has_model': model is not None
         })

@@ -5,10 +5,17 @@ import { supabase } from '../../lib/supabase';
 interface ModelUpdate {
   id: string;
   created_at: string;
-  local_accuracy: number;
+  local_accuracy: number | null;
   grad_norm: number;
   num_examples: number;
   storage_path: string;
+}
+
+function normalizeLabLabel(rawLabel?: string | null) {
+  return (rawLabel || 'lab_A')
+    .replace(/^Lab\s+/i, 'lab_')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_]/g, '');
 }
 
 export default function PatientDataCollection() {
@@ -38,8 +45,7 @@ export default function PatientDataCollection() {
   const [result, setResult] = useState<{
     risk_score: number;
     disease_type: string;
-    local_accuracy?: number;
-    num_examples?: number;
+    model_source?: string;
     insights?: {
       risk_factors?: Array<{type: string; severity: string; description: string}>;
       critical_values?: Array<{metric: string; value: number; status: string; message: string}>;
@@ -56,7 +62,7 @@ export default function PatientDataCollection() {
   useEffect(() => {
     const loadModelUpdates = async () => {
       try {
-        const labLabel = user?.labName || user?.email || 'lab_sim';
+        const labLabel = normalizeLabLabel(user?.labName || user?.email);
         const { data, error } = await supabase
           .from('fl_client_updates')
           .select('*')
@@ -82,8 +88,8 @@ export default function PatientDataCollection() {
     setSuccess('');
 
     try {
-      const labLabel = user?.labName || user?.email || 'lab_sim';
-      const resp = await fetch(`${serverUrl}/lab/add_patient_data`, {
+      const labLabel = normalizeLabLabel(user?.labName || user?.email);
+      const resp = await fetch(`${serverUrl}/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -113,13 +119,12 @@ export default function PatientDataCollection() {
       console.log('Backend Response:', data);
       console.log('Risk Score:', data.risk_score, 'Disease Type:', data.disease_type);
       setResult({
-        risk_score: data.risk_score,
-        disease_type: data.disease_type,
-        local_accuracy: data.local_accuracy,
-        num_examples: data.num_examples,
+        risk_score: data.confidence ?? data.risk_score,
+        disease_type: data.diagnosis_label ?? data.disease_type,
+        model_source: data.model_source,
         insights: data.insights,
       });
-      setSuccess('Patient data analyzed and model updated via federated learning');
+      setSuccess(`Patient data analyzed using ${data.model_source || 'active'} model`);
       
       // Refresh model updates
       const { data: updates, error } = await supabase
@@ -460,20 +465,10 @@ export default function PatientDataCollection() {
                       <div className="text-xs text-indigo-600 mb-1">Lab Network</div>
                       <div className="font-semibold text-indigo-900">{user?.labName || 'Lab Network'}</div>
                     </div>
-                    {result.local_accuracy && (
-                      <div>
-                        <div className="text-xs text-indigo-600 mb-1">Local Test Accuracy</div>
-                        <div className="font-semibold text-indigo-900">
-                          {(result.local_accuracy * 100).toFixed(1)}%
-                        </div>
-                      </div>
-                    )}
-                    {result.num_examples && (
-                      <div>
-                        <div className="text-xs text-indigo-600 mb-1">Training Samples</div>
-                        <div className="font-semibold text-indigo-900">{result.num_examples} records</div>
-                      </div>
-                    )}
+                    <div>
+                      <div className="text-xs text-indigo-600 mb-1">Prediction Source</div>
+                      <div className="font-semibold text-indigo-900">{result.model_source || 'active_model'}</div>
+                    </div>
                     <div>
                       <div className="text-xs text-indigo-600 mb-1">Privacy Status</div>
                       <div className="font-semibold text-green-700 flex items-center">
@@ -486,9 +481,8 @@ export default function PatientDataCollection() {
                   </div>
                   <div className="mt-3 p-3 bg-white bg-opacity-60 rounded border border-indigo-200">
                     <p className="text-xs text-indigo-800 leading-relaxed">
-                      <strong>🔒 Privacy-Preserving Analysis:</strong> This diagnosis was generated using federated learning technology. 
-                      Your patient data never leaves this lab. Only encrypted model parameters are shared with the global network, 
-                      ensuring complete data privacy while benefiting from collaborative AI training across multiple medical institutions.
+                      <strong>🔒 Privacy-Preserving Analysis:</strong> This diagnosis uses the lab&apos;s current prediction pipeline. 
+                      Patient data stays in the lab workflow, while federated learning weight updates are shared separately to improve the shared model over time.
                     </p>
                   </div>
                 </div>
@@ -562,7 +556,7 @@ export default function PatientDataCollection() {
       <div className="bg-white rounded-lg shadow p-6">
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Model Update History</h3>
         {modelUpdates.length === 0 ? (
-          <p className="text-gray-500 text-sm">No model updates yet. Submit patient data to see updates.</p>
+          <p className="text-gray-500 text-sm">No federated model updates yet. Use the FL workflow to send weight updates to the global server.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">

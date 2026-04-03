@@ -21,6 +21,13 @@ interface FeedbackItem {
 
 const API_BASE = 'http://localhost:5001';
 
+function normalizeLabLabel(rawLabel?: string | null) {
+  return (rawLabel || 'lab_A')
+    .replace(/^Lab\s+/i, 'lab_')
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9_]/g, '');
+}
+
 export default function DoctorFeedback() {
   const { user } = useAuth();
   const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
@@ -28,8 +35,7 @@ export default function DoctorFeedback() {
   const [error, setError] = useState<string | null>(null);
 
   // Get lab label from user context or default
-  const labLabel = user?.labName?.toLowerCase().includes('lab a') ? 'lab_A' : 
-                   user?.labName?.toLowerCase().includes('lab b') ? 'lab_B' : 'lab_A';
+  const labLabel = normalizeLabLabel(user?.labName || user?.email);
 
   const fetchFeedback = async () => {
     try {
