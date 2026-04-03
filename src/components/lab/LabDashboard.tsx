@@ -5,9 +5,10 @@ import SendReport from './SendReport';
 import DoctorFeedback from './DoctorFeedback';
 import FederatedLearning from './FederatedLearning';
 import ClinicalDataEntry from './ClinicalDataEntry';
-import { Users, Upload, MessageSquare, Brain, ClipboardList } from 'lucide-react';
+import PatientReports from './PatientReports';
+import { Users, Upload, MessageSquare, Brain, ClipboardList, Shield } from 'lucide-react';
 
-type Tab = 'patients' | 'send' | 'feedback' | 'federated' | 'collect';
+type Tab = 'patients' | 'send' | 'feedback' | 'federated' | 'collect' | 'privateReports';
 
 export default function LabDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('collect');
@@ -15,7 +16,8 @@ export default function LabDashboard() {
   const tabs = [
     { id: 'collect' as Tab, label: 'Clinical Data Entry', icon: ClipboardList },
     { id: 'patients' as Tab, label: 'Incoming Patients', icon: Users },
-    { id: 'send' as Tab, label: 'Send Report', icon: Upload },
+    { id: 'send' as Tab, label: 'File Reports', icon: Upload },
+    { id: 'privateReports' as Tab, label: 'Private HE Reports', icon: Shield },
     { id: 'feedback' as Tab, label: 'Doctor Feedback', icon: MessageSquare },
     { id: 'federated' as Tab, label: 'Model Training', icon: Brain },
   ];
@@ -44,6 +46,7 @@ export default function LabDashboard() {
         {activeTab === 'collect' && <ClinicalDataEntry />}
         {activeTab === 'patients' && <IncomingPatients />}
         {activeTab === 'send' && <SendReport />}
+        {activeTab === 'privateReports' && <PatientReports />}
         {activeTab === 'feedback' && <DoctorFeedback />}
         {activeTab === 'federated' && <FederatedLearning />}
       </div>

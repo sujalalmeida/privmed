@@ -34,9 +34,11 @@ export default function ClinicalDataEntry() {
   const { user } = useAuth();
   const [serverUrl, setServerUrl] = useState('http://127.0.0.1:5001');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmittingGlobal, setIsSubmittingGlobal] = useState(false);
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [globalSubmitMessage, setGlobalSubmitMessage] = useState<string | null>(null);
   
   // Generate unique patient ID
   const generatePatientId = () => {
@@ -197,6 +199,7 @@ export default function ClinicalDataEntry() {
       };
       
       setResult(predictionResult);
+      setGlobalSubmitMessage(null);
 
       // Backend /submit now persists to patient_records (Option B); no direct frontend insert.
       const modelSource = data.model_source || 'unknown';
@@ -207,6 +210,59 @@ export default function ClinicalDataEntry() {
       setError(err instanceof Error ? err.message : 'Failed to get prediction');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const buildClinicalReasoning = () => {
+    if (!result) {
+      return '';
+    }
+    const ranked = Object.entries(result.probabilities)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 2)
+      .map(([label, probability]) => `${label.replace('_', ' ')} ${(probability * 100).toFixed(1)}%`);
+    return `Primary prediction: ${result.diagnosis_label.replace('_', ' ')} at ${(result.confidence * 100).toFixed(1)}% confidence. Differential: ${ranked.join(', ')}.`;
+  };
+
+  const handleSubmitToGlobal = async () => {
+    if (!result) {
+      setError('Generate a local prediction before submitting an encrypted report to the global dashboard.');
+      return;
+    }
+
+    try {
+      setIsSubmittingGlobal(true);
+      setError(null);
+      setGlobalSubmitMessage(null);
+
+      const patientData = buildPatientData();
+      const response = await fetch(`${serverUrl}/lab/submit_report_to_global`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          patient_data: patientData,
+          plaintext_metadata: {
+            lab_id: user?.id || normalizeLabLabel(user?.labName || 'Lab A'),
+            lab_label: user?.labName || 'Lab A',
+            patient_id_hash: patientId,
+            prediction: result.diagnosis_label,
+            confidence: result.confidence,
+            clinical_reasoning: buildClinicalReasoning(),
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setGlobalSubmitMessage(data.message || 'Encrypted report submitted to global dashboard.');
+    } catch (err) {
+      console.error('Encrypted report submission error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to submit encrypted report');
+    } finally {
+      setIsSubmittingGlobal(false);
     }
   };
   
@@ -252,7 +308,10 @@ export default function ClinicalDataEntry() {
     setResult(null);
     setError(null);
     setSuccessMessage(null);
+    setGlobalSubmitMessage(null);
   };
+
+  const normalizeLabLabel = (labName: string) => labName.replace(/^Lab\s+/i, 'lab_').replace(/\s+/g, '_');
   
   return (
     <div className="clinical-data-entry">
@@ -283,6 +342,16 @@ export default function ClinicalDataEntry() {
           {successMessage}
         </div>
       )}
+
+      {globalSubmitMessage && (
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg text-blue-800">
+          {globalSubmitMessage}
+        </div>
+      )}
+
+      <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+        Numerical clinical fields are homomorphically encrypted when you submit to the global dashboard. Diagnosis, confidence, and reasoning remain visible as de-identified summary metadata.
+      </div>
       
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -404,7 +473,15 @@ export default function ClinicalDataEntry() {
             disabled={isSubmitting}
             className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors"
           >
-            {isSubmitting ? 'Analyzing...' : 'Submit for AI Prediction'}
+            {isSubmitting ? 'Analyzing...' : 'Make Prediction (Local)'}
+          </button>
+          <button
+            type="button"
+            disabled={!result || isSubmittingGlobal}
+            onClick={handleSubmitToGlobal}
+            className="flex-1 bg-emerald-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-emerald-700 disabled:bg-emerald-300 disabled:cursor-not-allowed transition-colors"
+          >
+            {isSubmittingGlobal ? 'Encrypting...' : 'Submit To Global Dashboard'}
           </button>
           <button
             type="button"

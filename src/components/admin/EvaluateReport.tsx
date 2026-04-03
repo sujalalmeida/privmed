@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { ArrowLeft, Lock, Brain, Send, ThumbsUp, ThumbsDown, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Lock, Brain, Send, ThumbsUp, ThumbsDown, AlertCircle, Shield } from 'lucide-react';
 
 interface EvaluateReportProps {
   reportId: string;
@@ -9,27 +9,26 @@ interface EvaluateReportProps {
 
 interface ReportData {
   id: string;
-  patient_id: string;
+  patient_id_hash: string;
   lab_label: string;
-  diagnosis: number;
   diagnosis_label: string;
   confidence: number;
-  probabilities: number[] | null;
+  probabilities: Record<string, number>;
   created_at: string;
-  age: number | null;
-  sex: string | null;
-  height_cm: number | null;
-  weight_kg: number | null;
-  bmi: number | null;
-  systolic_bp: number | null;
-  diastolic_bp: number | null;
-  heart_rate: number | null;
-  fasting_glucose: number | null;
-  hba1c: number | null;
-  total_cholesterol: number | null;
-  ldl_cholesterol: number | null;
-  hdl_cholesterol: number | null;
-  triglycerides: number | null;
+  clinical_reasoning: string;
+  encrypted: boolean;
+  encryption_scheme: string;
+}
+
+interface AggregateContext {
+  cohort_prediction: string;
+  report_count_in_cohort: number;
+  age_band: string | null;
+  average_fasting_glucose: number | null;
+  average_hba1c: number | null;
+  average_bmi: number | null;
+  diagnosis_prevalence: Record<string, { count: number; share: number }>;
+  evaluated_by_lab: string;
 }
 
 interface FeedbackData {
@@ -54,11 +53,10 @@ const API_BASE = 'http://localhost:5001';
 export default function EvaluateReport({ reportId, onClose }: EvaluateReportProps) {
   const { user } = useAuth();
   const [report, setReport] = useState<ReportData | null>(null);
+  const [aggregateContext, setAggregateContext] = useState<AggregateContext | null>(null);
   const [existingFeedback, setExistingFeedback] = useState<FeedbackData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Feedback form state
   const [agree, setAgree] = useState<boolean | null>(null);
   const [correctDiagnosis, setCorrectDiagnosis] = useState<number | null>(null);
   const [remarks, setRemarks] = useState('');
@@ -70,16 +68,16 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
       try {
         setLoading(true);
         setError(null);
-        
+
         const response = await fetch(`${API_BASE}/admin/reports/${reportId}`);
-        
         if (!response.ok) {
           throw new Error('Failed to fetch report');
         }
-        
+
         const data = await response.json();
         setReport(data.report);
-        
+        setAggregateContext(data.aggregate_context || null);
+
         if (data.feedback) {
           setExistingFeedback(data.feedback);
           setAgree(data.feedback.agree);
@@ -93,13 +91,13 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
         setLoading(false);
       }
     };
-    
+
     fetchReport();
   }, [reportId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (agree === null) {
       setError('Please select whether you agree or disagree with the AI prediction');
       return;
@@ -111,9 +109,7 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
     try {
       const response = await fetch(`${API_BASE}/admin/reports/${reportId}/feedback`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agree,
           correct_diagnosis: !agree ? correctDiagnosis : null,
@@ -162,7 +158,7 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
     );
   }
 
-  const probabilities = report.probabilities || [];
+  const probabilities = report.probabilities || {};
 
   return (
     <div className="space-y-6">
@@ -198,17 +194,17 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
       <div className="bg-white rounded-lg shadow p-6">
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Report Information</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Encrypted Report Metadata</h3>
             <span className="flex items-center text-sm text-blue-600">
               <Lock className="w-4 h-4 mr-1" />
-              Encrypted Data
+              {report.encryption_scheme}
             </span>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
-              <span className="text-gray-600">Patient ID:</span>
-              <span className="ml-2 font-medium text-gray-900">{report.patient_id || 'Unknown'}</span>
+              <span className="text-gray-600">Patient Hash:</span>
+              <span className="ml-2 font-medium text-gray-900">{report.patient_id_hash.slice(0, 16)}...</span>
             </div>
             <div>
               <span className="text-gray-600">Lab:</span>
@@ -223,64 +219,35 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
               </span>
             </div>
             <div>
-              <span className="text-gray-600">Age/Sex:</span>
-              <span className="ml-2 font-medium text-gray-900">
-                {report.age || 'N/A'} / {report.sex || 'N/A'}
-              </span>
+              <span className="text-gray-600">Protection:</span>
+              <span className="ml-2 font-medium text-emerald-700">Numerical values remain encrypted</span>
             </div>
           </div>
 
-          {/* Clinical Data Summary */}
-          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-            <h4 className="font-medium text-gray-900 mb-2">Clinical Data</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              {report.systolic_bp && report.diastolic_bp && (
-                <div>
-                  <span className="text-gray-500">BP:</span>
-                  <span className="ml-1 font-medium">{report.systolic_bp}/{report.diastolic_bp} mmHg</span>
-                </div>
-              )}
-              {report.heart_rate && (
-                <div>
-                  <span className="text-gray-500">HR:</span>
-                  <span className="ml-1 font-medium">{report.heart_rate} bpm</span>
-                </div>
-              )}
-              {report.fasting_glucose && (
-                <div>
-                  <span className="text-gray-500">Glucose:</span>
-                  <span className="ml-1 font-medium">{report.fasting_glucose} mg/dL</span>
-                </div>
-              )}
-              {report.hba1c && (
-                <div>
-                  <span className="text-gray-500">HbA1c:</span>
-                  <span className="ml-1 font-medium">{report.hba1c}%</span>
-                </div>
-              )}
-              {report.total_cholesterol && (
-                <div>
-                  <span className="text-gray-500">Cholesterol:</span>
-                  <span className="ml-1 font-medium">{report.total_cholesterol} mg/dL</span>
-                </div>
-              )}
-              {report.bmi && (
-                <div>
-                  <span className="text-gray-500">BMI:</span>
-                  <span className="ml-1 font-medium">{report.bmi.toFixed(1)}</span>
-                </div>
-              )}
+          <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="flex items-start">
+              <Shield className="w-5 h-5 text-blue-600 mr-2 mt-0.5" />
+              <div>
+                <h4 className="font-medium text-blue-900">HE-safe review mode</h4>
+                <p className="mt-1 text-sm text-blue-800">
+                  This admin screen does not decrypt individual patient measurements. You are reviewing de-identified metadata, AI prediction output, and cohort-level summaries computed from encrypted reports.
+                </p>
+              </div>
             </div>
+          </div>
+
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+            <h4 className="font-medium text-gray-900 mb-2">Clinical Reasoning</h4>
+            <p className="text-sm text-gray-700">{report.clinical_reasoning || 'No reasoning provided.'}</p>
           </div>
         </div>
 
-        {/* AI Prediction Section */}
         <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-center mb-3">
             <Brain className="w-5 h-5 text-blue-600 mr-2" />
             <h4 className="font-semibold text-blue-900">AI Prediction</h4>
           </div>
-          
+
           <div className="flex items-center justify-between mb-4">
             <div>
               <span className="text-2xl font-bold text-blue-900 capitalize">
@@ -292,28 +259,60 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
             </div>
           </div>
 
-          {probabilities.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-sm text-blue-800 font-medium">Probability Distribution:</p>
-              {DIAGNOSIS_OPTIONS.map((opt, idx) => (
+          <div className="space-y-2">
+            <p className="text-sm text-blue-800 font-medium">Probability Distribution:</p>
+            {DIAGNOSIS_OPTIONS.map((opt) => {
+              const probability = probabilities[opt.label.toLowerCase().replace(' ', '_')] || 0;
+              return (
                 <div key={opt.value} className="flex items-center">
                   <span className="text-sm text-blue-800 w-28">{opt.label}</span>
                   <div className="flex-1 bg-blue-200 rounded-full h-2 mr-3">
-                    <div
-                      className="bg-blue-600 h-2 rounded-full"
-                      style={{ width: `${(probabilities[idx] || 0) * 100}%` }}
-                    />
+                    <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${probability * 100}%` }} />
                   </div>
                   <span className="text-sm font-medium text-blue-900 w-16 text-right">
-                    {((probabilities[idx] || 0) * 100).toFixed(1)}%
+                    {(probability * 100).toFixed(1)}%
                   </span>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Feedback Form */}
+        <div className="mb-6 bg-emerald-50 border border-emerald-200 rounded-lg p-4">
+          <h4 className="font-semibold text-emerald-900 mb-3">Encrypted Cohort Context</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="text-emerald-700">Cohort prediction:</span>
+              <span className="ml-2 font-medium text-emerald-900 capitalize">
+                {aggregateContext?.cohort_prediction?.replace('_', ' ') || 'N/A'}
+              </span>
+            </div>
+            <div>
+              <span className="text-emerald-700">Reports in cohort:</span>
+              <span className="ml-2 font-medium text-emerald-900">{aggregateContext?.report_count_in_cohort ?? 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-emerald-700">Age band:</span>
+              <span className="ml-2 font-medium text-emerald-900">{aggregateContext?.age_band || 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-emerald-700">Avg fasting glucose:</span>
+              <span className="ml-2 font-medium text-emerald-900">{aggregateContext?.average_fasting_glucose ?? 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-emerald-700">Avg HbA1c:</span>
+              <span className="ml-2 font-medium text-emerald-900">{aggregateContext?.average_hba1c ?? 'N/A'}</span>
+            </div>
+            <div>
+              <span className="text-emerald-700">Avg BMI:</span>
+              <span className="ml-2 font-medium text-emerald-900">{aggregateContext?.average_bmi ?? 'N/A'}</span>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-emerald-800">
+            These are cohort-level summaries computed from encrypted reports and evaluated by {(aggregateContext?.evaluated_by_lab || 'lab_A').replace('_', ' ')}. They are not this patient’s individual measurements.
+          </p>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -354,7 +353,7 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
               </label>
               <select
                 value={correctDiagnosis ?? ''}
-                onChange={(e) => setCorrectDiagnosis(e.target.value ? parseInt(e.target.value) : null)}
+                onChange={(e) => setCorrectDiagnosis(e.target.value ? parseInt(e.target.value, 10) : null)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Select correct diagnosis (optional)</option>
@@ -382,7 +381,7 @@ export default function EvaluateReport({ reportId, onClose }: EvaluateReportProp
 
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <p className="text-sm text-yellow-800">
-              Your feedback helps improve the AI model and ensures quality of predictions across the federated learning network.
+              Your feedback helps improve the AI model while keeping individual clinical values encrypted on the admin side.
             </p>
           </div>
 

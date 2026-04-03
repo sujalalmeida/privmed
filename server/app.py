@@ -6,6 +6,7 @@ import time
 import pickle
 import tempfile
 import uuid
+import hashlib
 from typing import Optional, List
 import base64
 import json
@@ -56,6 +57,12 @@ from tenseal_ckks import (
     decrypt_weight_payload_for_lab,
     get_he_stats,
     load_encrypted_weight_payload,
+)
+from privacy.report_encryption import (
+    compute_encrypted_aggregate_payloads,
+    decrypt_aggregate_stats,
+    decrypt_patient_report,
+    encrypt_patient_report,
 )
 
 # Load env from both repo root and server folder.
@@ -1122,6 +1129,172 @@ def _safe_float(value, default=None):
         return default
 
 
+def _hash_patient_identifier(patient_id: str | None) -> str:
+    raw_patient_id = str(patient_id or f"anon-{uuid.uuid4()}").strip()
+    return hashlib.sha256(raw_patient_id.encode('utf-8')).hexdigest()
+
+
+def _build_global_report_reasoning(insights: dict | None, diagnosis_label: str, confidence: float) -> str:
+    insights = insights or {}
+    recommendations = [
+        item.get('action')
+        for item in insights.get('recommendations', [])
+        if isinstance(item, dict) and item.get('action')
+    ]
+    critical_values = [
+        item.get('message')
+        for item in insights.get('critical_values', [])
+        if isinstance(item, dict) and item.get('message')
+    ]
+    summary_bits = [
+        f"Prediction: {diagnosis_label.replace('_', ' ')}",
+        f"Confidence: {confidence:.1%}",
+    ]
+    if critical_values:
+        summary_bits.append(critical_values[0])
+    if recommendations:
+        summary_bits.append(recommendations[0])
+    return " | ".join(summary_bits)
+
+
+def _global_report_row_payload(row: dict) -> dict:
+    return {
+        'id': row.get('id'),
+        'created_at': row.get('created_at'),
+        'lab_label': row.get('lab_label'),
+        'patient_id_hash': row.get('patient_id_hash'),
+        'prediction': row.get('prediction'),
+        'confidence': row.get('confidence'),
+        'clinical_reasoning': row.get('clinical_reasoning'),
+        'encrypted': row.get('encrypted', True),
+        'encryption_scheme': row.get('encryption_scheme', 'HE-CKKS'),
+    }
+
+
+def _write_global_report_audit(event_type: str, actor_role: str, actor_label: str | None = None, details: dict | None = None):
+    try:
+        sb().table('patient_reports_global_audit').insert({
+            'event_type': event_type,
+            'actor_role': actor_role,
+            'actor_label': actor_label,
+            'details': details or {},
+        }).execute()
+    except Exception as audit_err:
+        print(f"Global report audit log unavailable: {audit_err}")
+
+
+def _query_global_reports(lab_label: str | None = None, prediction: str | None = None, limit: int = 100):
+    query = (
+        sb()
+        .table('patient_reports_global')
+        .select('*')
+        .order('created_at', desc=True)
+        .limit(limit)
+    )
+    if lab_label:
+        query = query.eq('lab_label', normalize_lab_label(lab_label))
+    if prediction:
+        query = query.eq('prediction', str(prediction))
+    result = query.execute()
+    return result.data or []
+
+
+def _get_global_report_by_id(record_id: str) -> dict | None:
+    result = sb().table('patient_reports_global').select('*').eq('id', record_id).limit(1).execute()
+    return result.data[0] if result.data else None
+
+
+def _get_global_feedback_map(report_ids: list[str]) -> dict[str, dict]:
+    if not report_ids:
+        return {}
+    try:
+        feedback_result = (
+            sb()
+            .table('doctor_feedback_global_reports')
+            .select('report_id, agree, correct_diagnosis, correct_diagnosis_label, reviewer_name, reviewer_role, remarks, created_at, updated_at')
+            .in_('report_id', report_ids)
+            .execute()
+        )
+        return {row['report_id']: row for row in (feedback_result.data or [])}
+    except Exception as feedback_err:
+        print(f"Could not fetch encrypted report feedback: {feedback_err}")
+        return {}
+
+
+def _build_encrypted_report_cohort_summary(report_row: dict) -> dict:
+    prediction = report_row.get('prediction')
+    cohort_rows = _query_global_reports(prediction=prediction, limit=1000)
+    summary = _compute_global_report_summary(cohort_rows)
+    aggregate_stats = summary.get('aggregate_stats') or {}
+    averages = aggregate_stats.get('averages') or {}
+    return {
+        'cohort_prediction': prediction,
+        'report_count_in_cohort': summary.get('total_reports', 0),
+        'age_band': aggregate_stats.get('age_band'),
+        'average_fasting_glucose': averages.get('fasting_glucose'),
+        'average_hba1c': averages.get('hba1c'),
+        'average_bmi': averages.get('bmi'),
+        'diagnosis_prevalence': summary.get('prediction_prevalence', {}),
+        'evaluated_by_lab': summary.get('evaluated_by_lab', GLOBAL_EVALUATION_LAB),
+    }
+
+
+def _prediction_distribution_from_label(prediction_label: str, confidence: float | None) -> dict:
+    confidence = float(confidence or 0.0)
+    confidence = min(max(confidence, 0.0), 1.0)
+    remaining = max(0.0, 1.0 - confidence)
+    non_primary = remaining / max(1, len(DIAGNOSIS_LABELS) - 1)
+    distribution = {label: non_primary for label in DIAGNOSIS_LABELS.values()}
+    if prediction_label in distribution:
+        distribution[prediction_label] = confidence
+    return distribution
+
+
+def _compute_global_report_summary(rows: list[dict]) -> dict:
+    if not rows:
+        return {
+            'total_reports': 0,
+            'recent_reports': [],
+            'prediction_prevalence': {},
+            'average_confidence': None,
+            'aggregate_stats': None,
+            'evaluated_by_lab': GLOBAL_EVALUATION_LAB,
+        }
+
+    encrypted_bundles = [row.get('encrypted_numeric_fields') for row in rows if row.get('encrypted_numeric_fields')]
+    aggregate_stats = None
+    if encrypted_bundles:
+        aggregate_payload = compute_encrypted_aggregate_payloads(encrypted_bundles)
+        aggregate_stats = decrypt_aggregate_stats(aggregate_payload, GLOBAL_EVALUATION_LAB)
+
+    prediction_counts: dict[str, int] = {}
+    confidences: list[float] = []
+    for row in rows:
+        prediction_label = str(row.get('prediction') or 'unknown')
+        prediction_counts[prediction_label] = prediction_counts.get(prediction_label, 0) + 1
+        confidence = _safe_float(row.get('confidence'))
+        if confidence is not None:
+            confidences.append(confidence)
+
+    total_reports = len(rows)
+    prevalence = {
+        label: {
+            'count': count,
+            'share': round(count / total_reports, 4),
+        }
+        for label, count in sorted(prediction_counts.items(), key=lambda item: item[1], reverse=True)
+    }
+
+    return {
+        'total_reports': total_reports,
+        'recent_reports': [_global_report_row_payload(row) for row in rows[:10]],
+        'prediction_prevalence': prevalence,
+        'average_confidence': round(float(np.mean(confidences)), 4) if confidences else None,
+        'aggregate_stats': aggregate_stats,
+        'evaluated_by_lab': GLOBAL_EVALUATION_LAB,
+    }
+
+
 def _build_patient_record_from_submit(body, prediction):
     """
     Build a patient_records row from /submit request body (new clinical schema)
@@ -1242,6 +1415,142 @@ def submit_patient_data():
     except Exception as e:
         import traceback
         print(f"Error in submit: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/lab/submit_report_to_global")
+def submit_report_to_global():
+    """
+    Lab-side encrypted clinical report submission.
+    Numerical fields are encrypted with CKKS before they are stored in the
+    global-report table. The current patient_records workflow remains unchanged.
+    """
+    try:
+        body = request.get_json(force=True) or {}
+        patient_data = body.get('patient_data') or {}
+        plaintext_metadata = body.get('plaintext_metadata') or {}
+        raw_lab_label = plaintext_metadata.get('lab_label') or patient_data.get('lab_label') or body.get('lab_label') or 'lab_A'
+        lab_label = normalize_lab_label(raw_lab_label)
+
+        prediction_label = (
+            plaintext_metadata.get('prediction')
+            or body.get('prediction')
+            or patient_data.get('diagnosis_label')
+            or 'unknown'
+        )
+        confidence = _safe_float(
+            plaintext_metadata.get('confidence', body.get('confidence')),
+            0.0,
+        )
+        clinical_reasoning = (
+            plaintext_metadata.get('clinical_reasoning')
+            or body.get('clinical_reasoning')
+            or ''
+        )
+
+        if not clinical_reasoning:
+            diagnosis_label = str(prediction_label)
+            insights = generate_clinical_insights(patient_data, diagnosis_label, confidence or 0.0)
+            clinical_reasoning = _build_global_report_reasoning(insights, diagnosis_label, confidence or 0.0)
+
+        encrypted_numeric_fields = encrypt_patient_report(patient_data, lab_label)
+        row = {
+            'lab_id': str(plaintext_metadata.get('lab_id') or lab_label),
+            'lab_label': lab_label,
+            'patient_id_hash': _hash_patient_identifier(patient_data.get('patient_id') or plaintext_metadata.get('patient_id_hash')),
+            'prediction': str(prediction_label),
+            'confidence': float(confidence or 0.0),
+            'clinical_reasoning': clinical_reasoning,
+            'encrypted_numeric_fields': encrypted_numeric_fields,
+            'encrypted': True,
+            'encryption_scheme': 'HE-CKKS',
+            'lab_key_id': f"{lab_label}:{HE_CONTEXT_VERSION}",
+            'plaintext_metadata': {
+                'prediction': str(prediction_label),
+                'confidence': float(confidence or 0.0),
+                'lab_label': lab_label,
+            },
+        }
+
+        result = sb().table('patient_reports_global').insert(row).execute()
+        created_row = result.data[0] if result.data else row
+        _write_global_report_audit(
+            'submit_report',
+            actor_role='lab',
+            actor_label=lab_label,
+            details={'report_id': created_row.get('id'), 'prediction': created_row.get('prediction')},
+        )
+
+        return jsonify({
+            'success': True,
+            'message': 'Report encrypted and submitted to the global dashboard.',
+            'report': _global_report_row_payload(created_row),
+            'he_numeric_fields_protected': True,
+        })
+    except Exception as e:
+        import traceback
+        print(f"Error in submit_report_to_global: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/lab/global_reports/decrypt_aggregate")
+def decrypt_global_report_aggregate():
+    try:
+        body = request.get_json(force=True) or {}
+        aggregate_payload = body.get('aggregate_payload') or {}
+        lab_label = normalize_lab_label(body.get('lab_label') or GLOBAL_EVALUATION_LAB)
+        stats = decrypt_aggregate_stats(aggregate_payload, lab_label)
+        _write_global_report_audit(
+            'decrypt_aggregate',
+            actor_role='lab',
+            actor_label=lab_label,
+            details={'summary_fields': list((stats.get('averages') or {}).keys())},
+        )
+        return jsonify({
+            'success': True,
+            'lab_label': lab_label,
+            'aggregate_stats': stats,
+        })
+    except Exception as e:
+        import traceback
+        print(f"Error in decrypt_global_report_aggregate: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.get("/lab/private_reports")
+def get_lab_private_reports():
+    try:
+        lab_label = normalize_lab_label(request.args.get('lab_label') or 'lab_A')
+        limit = int(request.args.get('limit', 50))
+        rows = _query_global_reports(lab_label=lab_label, limit=limit)
+        reports = []
+        for row in rows:
+            decrypted_numeric_fields = decrypt_patient_report(row.get('encrypted_numeric_fields') or {}, lab_label)
+            report = _global_report_row_payload(row)
+            report['decrypted_numeric_fields'] = {
+                key: round(value, 2)
+                for key, value in decrypted_numeric_fields.items()
+            }
+            reports.append(report)
+
+        _write_global_report_audit(
+            'view_private_reports',
+            actor_role='lab',
+            actor_label=lab_label,
+            details={'report_count': len(reports)},
+        )
+
+        return jsonify({
+            'lab_label': lab_label,
+            'reports': reports,
+            'total': len(reports),
+        })
+    except Exception as e:
+        import traceback
+        print(f"Error in get_lab_private_reports: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
@@ -3525,10 +3834,66 @@ DIAGNOSIS_LABELS = {
 DIAGNOSIS_FROM_LABEL = {v: k for k, v in DIAGNOSIS_LABELS.items()}
 
 
+@app.get("/admin/global_reports/summary")
+def get_admin_global_report_summary():
+    try:
+        lab_label = request.args.get('lab_label')
+        prediction = request.args.get('prediction')
+        limit = int(request.args.get('limit', 100))
+        rows = _query_global_reports(lab_label=lab_label, prediction=prediction, limit=limit)
+        summary = _compute_global_report_summary(rows)
+        _write_global_report_audit(
+            'view_global_summary',
+            actor_role='central_admin',
+            details={'report_count': summary.get('total_reports', 0)},
+        )
+        return jsonify(summary)
+    except Exception as e:
+        print(f"Error in get_admin_global_report_summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.post("/admin/global_reports/aggregate")
+def aggregate_global_reports():
+    try:
+        body = request.get_json(force=True) or {}
+        lab_label = body.get('lab_label')
+        prediction = body.get('prediction')
+        limit = int(body.get('limit', 1000))
+        rows = _query_global_reports(lab_label=lab_label, prediction=prediction, limit=limit)
+        if not rows:
+            return jsonify({'error': 'No encrypted global reports available for aggregation'}), 404
+
+        encrypted_bundles = [row.get('encrypted_numeric_fields') for row in rows if row.get('encrypted_numeric_fields')]
+        if not encrypted_bundles:
+            return jsonify({'error': 'No encrypted numeric report bundles found'}), 400
+
+        aggregate_payload = compute_encrypted_aggregate_payloads(encrypted_bundles)
+        aggregate_stats = decrypt_aggregate_stats(aggregate_payload, GLOBAL_EVALUATION_LAB)
+        summary = _compute_global_report_summary(rows)
+        summary['aggregate_stats'] = aggregate_stats
+        summary['aggregate_payload'] = aggregate_payload
+
+        _write_global_report_audit(
+            'aggregate_global_reports',
+            actor_role='central_admin',
+            details={'report_count': len(rows), 'evaluated_by_lab': GLOBAL_EVALUATION_LAB},
+        )
+
+        return jsonify(summary)
+    except Exception as e:
+        print(f"Error in aggregate_global_reports: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.get("/admin/reports")
 def get_admin_reports():
     """
-    Get list of patient records (reports) for admin review.
+    Get HE-safe encrypted report metadata for admin review.
     
     Query params:
       - limit (int, default 50): max records to return
@@ -3536,7 +3901,7 @@ def get_admin_reports():
       - lab_label (str, optional): filter by lab
       - status (str, optional): 'pending', 'reviewed', 'all' (default 'all')
     
-    Returns list of reports with feedback status.
+    Returns encrypted-report metadata with feedback status.
     """
     try:
         limit = int(request.args.get('limit', 50))
@@ -3544,11 +3909,13 @@ def get_admin_reports():
         lab_filter = request.args.get('lab_label')
         status_filter = request.args.get('status', 'all')
         
-        # Query patient_records
-        query = sb().table('patient_records').select(
-            'id, patient_id, lab_label, diagnosis, diagnosis_label, confidence, '
-            'probabilities, created_at, age, sex'
-        ).order('created_at', desc=True).range(offset, offset + limit - 1)
+        query = (
+            sb()
+            .table('patient_reports_global')
+            .select('id, patient_id_hash, lab_label, prediction, confidence, clinical_reasoning, created_at, encrypted, encryption_scheme')
+            .order('created_at', desc=True)
+            .range(offset, offset + limit - 1)
+        )
         
         if lab_filter:
             query = query.eq('lab_label', normalize_lab_label(lab_filter))
@@ -3556,22 +3923,9 @@ def get_admin_reports():
         result = query.execute()
         records = result.data or []
         
-        # Get feedback for these records to determine status
         record_ids = [r['id'] for r in records]
-        feedback_map = {}
+        feedback_map = _get_global_feedback_map(record_ids)
         
-        if record_ids:
-            try:
-                feedback_result = sb().table('doctor_feedback').select(
-                    'record_id, agree, correct_diagnosis, reviewer_name, created_at'
-                ).in_('record_id', record_ids).execute()
-                
-                for fb in (feedback_result.data or []):
-                    feedback_map[fb['record_id']] = fb
-            except Exception as fb_err:
-                print(f"Could not fetch feedback: {fb_err}")
-        
-        # Build response with status
         reports = []
         for rec in records:
             has_feedback = rec['id'] in feedback_map
@@ -3585,27 +3939,26 @@ def get_admin_reports():
             
             reports.append({
                 'id': rec['id'],
-                'patient_id': rec.get('patient_id', 'Unknown'),
+                'patient_id_hash': rec.get('patient_id_hash', 'Unknown'),
                 'lab_label': rec.get('lab_label', 'Unknown'),
-                'diagnosis': rec.get('diagnosis'),
-                'diagnosis_label': rec.get('diagnosis_label', 'Unknown'),
+                'diagnosis_label': rec.get('prediction', 'Unknown'),
                 'confidence': rec.get('confidence'),
-                'probabilities': rec.get('probabilities'),
+                'clinical_reasoning': rec.get('clinical_reasoning', ''),
                 'created_at': rec.get('created_at'),
-                'age': rec.get('age'),
-                'sex': rec.get('sex'),
+                'encrypted': rec.get('encrypted', True),
+                'encryption_scheme': rec.get('encryption_scheme', 'HE-CKKS'),
                 'status': 'reviewed' if has_feedback else 'pending',
                 'feedback': {
                     'agree': fb.get('agree'),
                     'correct_diagnosis': fb.get('correct_diagnosis'),
+                    'correct_diagnosis_label': fb.get('correct_diagnosis_label'),
                     'reviewer_name': fb.get('reviewer_name'),
                     'reviewed_at': fb.get('created_at')
                 } if fb else None
             })
         
-        # Get total count
         try:
-            count_query = sb().table('patient_records').select('id', count='exact')
+            count_query = sb().table('patient_reports_global').select('id', count='exact')
             if lab_filter:
                 count_query = count_query.eq('lab_label', normalize_lab_label(lab_filter))
             count_result = count_query.execute()
@@ -3630,56 +3983,34 @@ def get_admin_reports():
 @app.get("/admin/reports/<record_id>")
 def get_admin_report_by_id(record_id):
     """
-    Get a single patient record (report) by ID for evaluation.
-    
-    Returns full record details including any existing feedback.
+    Get a single encrypted report by ID for HE-safe evaluation.
     """
     try:
-        # Fetch the record
-        result = sb().table('patient_records').select('*').eq('id', record_id).limit(1).execute()
-        
-        if not result.data or len(result.data) == 0:
+        record = _get_global_report_by_id(record_id)
+        if not record:
             return jsonify({'error': 'Report not found'}), 404
-        
-        record = result.data[0]
-        
-        # Fetch existing feedback if any
-        feedback = None
-        try:
-            fb_result = sb().table('doctor_feedback').select('*').eq('record_id', record_id).limit(1).execute()
-            if fb_result.data and len(fb_result.data) > 0:
-                feedback = fb_result.data[0]
-        except Exception as fb_err:
-            print(f"Could not fetch feedback: {fb_err}")
-        
+
+        feedback_map = _get_global_feedback_map([record_id])
+        feedback = feedback_map.get(record_id)
+        cohort_summary = _build_encrypted_report_cohort_summary(record)
+
         return jsonify({
             'report': {
                 'id': record['id'],
-                'patient_id': record.get('patient_id', 'Unknown'),
+                'patient_id_hash': record.get('patient_id_hash', 'Unknown'),
                 'lab_label': record.get('lab_label', 'Unknown'),
-                'diagnosis': record.get('diagnosis'),
-                'diagnosis_label': record.get('diagnosis_label', 'Unknown'),
+                'diagnosis_label': record.get('prediction', 'Unknown'),
                 'confidence': record.get('confidence'),
-                'probabilities': record.get('probabilities'),
                 'created_at': record.get('created_at'),
-                # Demographics
-                'age': record.get('age'),
-                'sex': record.get('sex'),
-                'height_cm': record.get('height_cm'),
-                'weight_kg': record.get('weight_kg'),
-                'bmi': record.get('bmi'),
-                # Vitals
-                'systolic_bp': record.get('systolic_bp'),
-                'diastolic_bp': record.get('diastolic_bp'),
-                'heart_rate': record.get('heart_rate'),
-                # Blood chemistry
-                'fasting_glucose': record.get('fasting_glucose'),
-                'hba1c': record.get('hba1c'),
-                'total_cholesterol': record.get('total_cholesterol'),
-                'ldl_cholesterol': record.get('ldl_cholesterol'),
-                'hdl_cholesterol': record.get('hdl_cholesterol'),
-                'triglycerides': record.get('triglycerides'),
+                'clinical_reasoning': record.get('clinical_reasoning', ''),
+                'encrypted': record.get('encrypted', True),
+                'encryption_scheme': record.get('encryption_scheme', 'HE-CKKS'),
+                'probabilities': _prediction_distribution_from_label(
+                    str(record.get('prediction', 'healthy')),
+                    record.get('confidence'),
+                ),
             },
+            'aggregate_context': cohort_summary,
             'feedback': {
                 'id': feedback.get('id'),
                 'agree': feedback.get('agree'),
@@ -3704,7 +4035,7 @@ def get_admin_report_by_id(record_id):
 @app.post("/admin/reports/<record_id>/feedback")
 def submit_report_feedback(record_id):
     """
-    Submit doctor feedback on a patient record's AI prediction.
+    Submit doctor feedback on an encrypted report's AI prediction.
     
     Body (JSON):
       - agree (bool, required): true = agree with AI, false = disagree
@@ -3736,14 +4067,12 @@ def submit_report_feedback(record_id):
                 return jsonify({'error': 'correct_diagnosis must be 0, 1, 2, or 3'}), 400
             correct_diagnosis_label = DIAGNOSIS_LABELS.get(correct_diagnosis)
         
-        # Verify record exists
-        rec_check = sb().table('patient_records').select('id').eq('id', record_id).limit(1).execute()
-        if not rec_check.data or len(rec_check.data) == 0:
+        report = _get_global_report_by_id(record_id)
+        if not report:
             return jsonify({'error': 'Record not found'}), 404
         
-        # Upsert feedback (insert or update if exists)
         feedback_data = {
-            'record_id': record_id,
+            'report_id': record_id,
             'reviewer_id': reviewer_id,
             'reviewer_name': reviewer_name,
             'reviewer_role': reviewer_role,
@@ -3753,9 +4082,9 @@ def submit_report_feedback(record_id):
             'remarks': remarks
         }
         
-        result = sb().table('doctor_feedback').upsert(
+        result = sb().table('doctor_feedback_global_reports').upsert(
             feedback_data,
-            on_conflict='record_id,reviewer_id'
+            on_conflict='report_id,reviewer_id'
         ).execute()
         
         print(f"Feedback submitted for record {record_id}: agree={agree}")

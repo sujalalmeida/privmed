@@ -114,6 +114,16 @@ def context_fingerprint(context_bytes: bytes) -> str:
     return hashlib.sha256(context_bytes).hexdigest()
 
 
+def get_shared_public_context_payload() -> Dict[str, Any]:
+    public_context_bytes = _shared_public_context_bytes()
+    return {
+        "public_context": public_context_bytes,
+        "context_fingerprint": context_fingerprint(public_context_bytes),
+        "context_version": HE_CONTEXT_VERSION,
+        "he_scheme": "CKKS",
+    }
+
+
 def flatten_sklearn_model(model: Any) -> Dict[str, Any]:
     coef = np.array(model.coef_, dtype=np.float64)
     intercept = np.array(model.intercept_, dtype=np.float64)
