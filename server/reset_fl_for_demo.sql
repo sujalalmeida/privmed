@@ -32,18 +32,28 @@ BEGIN
   END IF;
 END $$;
 
--- 7. (Optional) Reset patient records if you want fresh data
+-- 7. Delete FL test patient records used by A/B or evaluation dashboards (only if table exists)
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fl_test_patient_records') THEN
+    DELETE FROM public.fl_test_patient_records;
+  END IF;
+END $$;
+
+-- 8. (Optional) Reset patient records if you want fresh prediction history too
 -- Uncomment the next line if you want to clear patient data too
 -- DELETE FROM public.patient_records;
 
--- 8. Verify cleanup - show counts
+-- 9. Verify cleanup - show counts
 SELECT 'fl_client_updates' as table_name, COUNT(*) as row_count FROM public.fl_client_updates
 UNION ALL
 SELECT 'fl_global_models', COUNT(*) FROM public.fl_global_models
 UNION ALL
 SELECT 'fl_round_metrics', COUNT(*) FROM public.fl_round_metrics
 UNION ALL
-SELECT 'fl_runs', COUNT(*) FROM public.fl_runs;
+SELECT 'fl_runs', COUNT(*) FROM public.fl_runs
+UNION ALL
+SELECT 'fl_model_downloads', COUNT(*) FROM public.fl_model_downloads;
 
--- 9. Confirm success
+-- 10. Confirm success
 SELECT 'FL data reset complete! Ready for demo.' as status;

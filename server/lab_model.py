@@ -268,44 +268,37 @@ def create_fl_logistic_model(n_features: int):
 def load_or_init_model(lab_label: str, n_features: int):
     """
     Load existing model with priority:
-    1. Latest downloaded global model (best performance)
-    2. Lab's local model
+    1. Newest of downloaded global model or lab local model
     3. Create new model
     """
-    # Check for downloaded global models (use the most recent one)
     base = os.path.dirname(__file__)
     global_pattern = os.path.join(base, 'models', f'global_downloaded_{lab_label}_*.pkl')
     global_models = glob.glob(global_pattern)
-    
-    if global_models:
-        # Use the most recent global model
-        latest_global = max(global_models, key=os.path.getmtime)
-        print(f"Loading global model for {lab_label}: {latest_global}")
+    path = model_path_for_lab(lab_label)
+    latest_global = max(global_models, key=os.path.getmtime) if global_models else None
+
+    candidates = []
+    if latest_global:
+        candidates.append(('global', latest_global, os.path.getmtime(latest_global)))
+    if os.path.exists(path):
+        candidates.append(('local', path, os.path.getmtime(path)))
+
+    candidates.sort(key=lambda item: item[2], reverse=True)
+
+    for source, candidate_path, _ in candidates:
+        print(f"Loading {source} model for {lab_label}: {candidate_path}")
         try:
-            with open(latest_global, 'rb') as f:
+            with open(candidate_path, 'rb') as f:
                 model = pickle.load(f)
-                if not is_supported_fl_model(model):
-                    raise ValueError(f"Unsupported legacy global model type: {type(model).__name__}")
-                # Also copy it to the lab's local path for persistence
+            if not is_supported_fl_model(model):
+                raise ValueError(f"Unsupported legacy {source} model type: {type(model).__name__}")
+            if source == 'global':
                 local_path = model_path_for_lab(lab_label)
                 with open(local_path, 'wb') as lf:
                     pickle.dump(model, lf)
-                return model
-        except Exception as e:
-            print(f"Error loading global model: {e}, falling back to local logistic FL model")
-
-    # Check for lab's local model
-    path = model_path_for_lab(lab_label)
-    if os.path.exists(path):
-        print(f"Loading local model for {lab_label}: {path}")
-        try:
-            with open(path, 'rb') as f:
-                model = pickle.load(f)
-            if not is_supported_fl_model(model):
-                raise ValueError(f"Unsupported legacy local model type: {type(model).__name__}")
             return model
         except Exception as e:
-            print(f"Error loading local model: {e}, creating a fresh logistic FL model instead")
+            print(f"Error loading {source} model: {e}, trying next available candidate")
 
     # Create new model based on configured type
     print(f"Creating new {MODEL_TYPE} model for {lab_label}")

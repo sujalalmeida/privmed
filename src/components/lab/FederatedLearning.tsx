@@ -15,8 +15,13 @@ interface GlobalModelInfo {
     version: number | null;
     local_test_accuracy: number | null;
     accuracy: number | null;
+    accuracy_source?: 'local_upload' | 'downloaded_global' | null;
+    uploaded_local_test_accuracy?: number | null;
+    downloaded_local_test_accuracy?: number | null;
   };
   local_test_accuracy?: number | null;
+  uploaded_local_test_accuracy?: number | null;
+  downloaded_local_test_accuracy?: number | null;
   needs_update: boolean;
   has_downloaded: boolean;
 }
@@ -24,7 +29,7 @@ interface GlobalModelInfo {
 interface ImprovementMetrics {
   accuracy_before: number;
   accuracy_after: number;
-  improvement_percentage: number;
+  improvement_percentage: number | null;
   absolute_improvement: number;
 }
 
@@ -59,7 +64,9 @@ export default function FederatedLearning() {
   const [labUpdates, setLabUpdates] = useState<ClientUpdate[]>([]);
   
   const serverUrl = 'http://localhost:5001';
-  const latestLocalTestAccuracy = labUpdates[0]?.local_accuracy ?? globalModelInfo?.local_test_accuracy ?? null;
+  const latestLocalTestAccuracy = globalModelInfo?.local_model?.local_test_accuracy ?? globalModelInfo?.local_test_accuracy ?? null;
+  const latestUploadedLocalTestAccuracy = globalModelInfo?.uploaded_local_test_accuracy ?? globalModelInfo?.local_model?.uploaded_local_test_accuracy ?? labUpdates[0]?.local_accuracy ?? null;
+  const latestDownloadedLocalTestAccuracy = globalModelInfo?.downloaded_local_test_accuracy ?? globalModelInfo?.local_model?.downloaded_local_test_accuracy ?? null;
   const latestGlobalValidationAccuracy = globalModelInfo?.global_model?.global_validation_accuracy ?? null;
 
   const normalizedLabLabel = (user?.labName || user?.email || 'lab_sim')
@@ -464,6 +471,16 @@ export default function FederatedLearning() {
                   </span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-neutral-600">Accuracy Source:</span>
+                  <span className="font-medium text-neutral-900">
+                    {globalModelInfo.local_model?.accuracy_source === 'downloaded_global'
+                      ? 'Downloaded Global Weights'
+                      : globalModelInfo.local_model?.accuracy_source === 'local_upload'
+                      ? 'Local Upload'
+                      : 'N/A'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-neutral-600">Status:</span>
                   <span className={`text-xs font-medium ${globalModelInfo.needs_update ? 'text-warning-500' : 'text-success-500'}`}>
                     {globalModelInfo.needs_update ? 'Update Available' : 'Up to date'}
@@ -497,8 +514,9 @@ export default function FederatedLearning() {
                   <div className="col-span-2 bg-primary-500 rounded-md p-3 text-white">
                     <p className="text-xs mb-1 opacity-90">Performance Improvement</p>
                     <p className="text-xl font-semibold">
-                      {improvementMetrics.improvement_percentage > 0 ? '+' : ''}
-                      {improvementMetrics.improvement_percentage.toFixed(2)}%
+                      {improvementMetrics.improvement_percentage !== null && improvementMetrics.improvement_percentage !== undefined
+                        ? `${improvementMetrics.improvement_percentage > 0 ? '+' : ''}${improvementMetrics.improvement_percentage.toFixed(2)}%`
+                        : 'N/A'}
                     </p>
                     <p className="text-xs opacity-80 mt-1">
                       ({improvementMetrics.absolute_improvement > 0 ? '+' : ''}
@@ -540,6 +558,33 @@ export default function FederatedLearning() {
             >
               <RefreshCw className={`w-4 h-4 ${isCheckingGlobal ? 'animate-spin' : ''}`} />
             </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white rounded-md p-3 border border-neutral-200">
+              <p className="text-xs text-neutral-500 mb-1">Local Test Accuracy Before Download</p>
+              <p className="text-base font-semibold text-neutral-900">
+                {latestUploadedLocalTestAccuracy !== null && latestUploadedLocalTestAccuracy !== undefined
+                  ? `${(latestUploadedLocalTestAccuracy * 100).toFixed(1)}%`
+                  : 'N/A'}
+              </p>
+            </div>
+            <div className="bg-white rounded-md p-3 border border-neutral-200">
+              <p className="text-xs text-neutral-500 mb-1">Local Test Accuracy After Download</p>
+              <p className="text-base font-semibold text-success-500">
+                {latestDownloadedLocalTestAccuracy !== null && latestDownloadedLocalTestAccuracy !== undefined
+                  ? `${(latestDownloadedLocalTestAccuracy * 100).toFixed(1)}%`
+                  : 'N/A'}
+              </p>
+            </div>
+            <div className="bg-white rounded-md p-3 border border-neutral-200">
+              <p className="text-xs text-neutral-500 mb-1">Global Validation Accuracy</p>
+              <p className="text-base font-semibold text-primary-500">
+                {latestGlobalValidationAccuracy !== null && latestGlobalValidationAccuracy !== undefined
+                  ? `${(latestGlobalValidationAccuracy * 100).toFixed(1)}%`
+                  : 'N/A'}
+              </p>
+            </div>
           </div>
         </div>
       )}

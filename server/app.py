@@ -11,6 +11,7 @@ import base64
 import json
 import socket
 import warnings
+from functools import lru_cache
 from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -85,11 +86,12 @@ LOCAL_EPOCHS = 5
 DOCTOR_APPROVAL_THRESHOLD = 0.8
 DOCTOR_WEIGHT_MULTIPLIER = 1.5
 PATIENT_PREDICTION_MIN_CONFIDENCE = 0.40
-LAB_DATASET_FILES = {
-    'lab_A': 'lab_A_data.csv',
-    'lab_B': 'lab_B_data.csv',
-    'lab_C': 'lab_A_data.csv',
-    'lab_D': 'lab_B_data.csv',
+GLOBAL_EVALUATION_LAB = 'lab_A'
+DEMO_LAB_PARTITION_MANIFEST = {
+    'lab_A': {0: 140, 1: 110, 2: 60, 3: 40},
+    'lab_B': {0: 90, 1: 130, 2: 80, 3: 50},
+    'lab_C': {0: 70, 1: 70, 2: 140, 3: 70},
+    'lab_D': {0: 50, 1: 40, 2: 70, 3: 190},
 }
 CLINICAL_NUMERIC_FIELD_KEYS = [
     'age',
@@ -243,18 +245,76 @@ def load_test_dataset():
     return _load_encoded_dataset('combined_test.csv')
 
 
+@lru_cache(maxsize=1)
+def load_fl_training_dataset():
+    """Load the shared training pool used to derive deterministic demo lab partitions."""
+    X, y = _load_encoded_dataset('combined_train.csv')
+    if X is None or y is None:
+        raise ValueError("Unable to load combined_train.csv for FL demo partitions")
+    return X, y
+
+
+@lru_cache(maxsize=1)
+def get_fl_shared_scaler():
+    """All FL labs share one scaler so FedAvg weights stay in a common feature space."""
+    X_train_pool, _ = load_fl_training_dataset()
+    scaler = StandardScaler()
+    scaler.fit(X_train_pool)
+    return scaler
+
+
+def transform_fl_features(X: np.ndarray) -> np.ndarray:
+    scaler = get_fl_shared_scaler()
+    return scaler.transform(X)
+
+
+@lru_cache(maxsize=1)
+def build_demo_lab_partitions():
+    """
+    Build deterministic non-IID lab datasets from the shared combined training pool.
+    Each row is assigned to exactly one lab according to the fixed manifest.
+    """
+    X_pool, y_pool = load_fl_training_dataset()
+    rng = np.random.RandomState(RANDOM_SEED)
+    shuffled_indices_by_label = {}
+    for label in sorted({int(v) for v in np.unique(y_pool)}):
+        label_indices = np.where(y_pool == label)[0]
+        shuffled_indices_by_label[label] = rng.permutation(label_indices).tolist()
+
+    partitions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for lab_label, manifest in DEMO_LAB_PARTITION_MANIFEST.items():
+        selected_indices = []
+        for label, required_count in manifest.items():
+            available = shuffled_indices_by_label.get(label, [])
+            if len(available) < required_count:
+                raise ValueError(
+                    f"Not enough class-{label} rows to build demo partition for {lab_label}: "
+                    f"need {required_count}, have {len(available)}"
+                )
+            selected_indices.extend(available[:required_count])
+            shuffled_indices_by_label[label] = available[required_count:]
+
+        selected_indices = np.array(selected_indices, dtype=int)
+        lab_rng = np.random.RandomState(RANDOM_SEED + sum(ord(ch) for ch in lab_label))
+        lab_rng.shuffle(selected_indices)
+        partitions[lab_label] = (X_pool[selected_indices], y_pool[selected_indices])
+
+    return partitions
+
+
+def get_lab_dataset(lab_label: str):
+    partitions = build_demo_lab_partitions()
+    if lab_label not in partitions:
+        raise ValueError(f"No FL dataset configured for lab '{lab_label}'")
+    return partitions[lab_label]
+
+
 def get_lab_dataset_split(lab_label: str):
     """
     Load the authoritative per-lab CSV dataset and return a deterministic 80/20 split.
     The 20% split is reserved permanently as the lab's local test set.
     """
-    csv_name = LAB_DATASET_FILES.get(lab_label)
-    if not csv_name:
-        raise ValueError(f"No FL dataset configured for lab '{lab_label}'")
-
-    X, y = _load_encoded_dataset(csv_name)
-    if X is None or y is None:
-        raise ValueError(f"Unable to load FL dataset for lab '{lab_label}'")
+    X, y = get_lab_dataset(lab_label)
 
     return train_test_split(
         X,
@@ -268,6 +328,8 @@ def get_lab_dataset_split(lab_label: str):
 def evaluate_model_accuracy(model, X_eval: np.ndarray, y_eval: np.ndarray) -> float | None:
     """Evaluate model accuracy on a provided held-out dataset."""
     try:
+        if is_supported_fl_model(model):
+            X_eval = transform_fl_features(X_eval)
         X_eval = ensure_features_for_model(X_eval, model)
         preds = model.predict(X_eval)
         return float(accuracy_score(y_eval, preds))
@@ -293,6 +355,27 @@ def fit_local_epoch(model, X_train: np.ndarray, y_train: np.ndarray):
     return model
 
 
+def evaluate_encrypted_global_payload_for_lab(payload_bytes: bytes, evaluator_lab: str = GLOBAL_EVALUATION_LAB):
+    """
+    In this single-process demo, one designated lab decrypts and evaluates the
+    aggregate immediately so the admin UI can show Global Validation Accuracy.
+    """
+    decrypted_payload = decrypt_weight_payload_for_lab(payload_bytes, lab_label=evaluator_lab)
+    model = create_fl_logistic_model(int(decrypted_payload['weight_metadata']['n_features_in']))
+    model = apply_flat_weights_to_model(
+        model,
+        decrypted_payload['flat_weights'],
+        decrypted_payload['weight_metadata'],
+    )
+    X_val, y_val = load_validation_dataset()
+    if X_val is None or y_val is None:
+        raise ValueError("Unable to load combined_validation.csv for global validation")
+    global_validation_accuracy = evaluate_model_accuracy(model, X_val, y_val)
+    if global_validation_accuracy is None:
+        raise ValueError("Failed to evaluate aggregated model on the central validation set")
+    return global_validation_accuracy, model
+
+
 def build_encrypted_numeric_field_bundle(lab_label: str, body: dict) -> dict | None:
     values = []
     for key in CLINICAL_NUMERIC_FIELD_KEYS:
@@ -306,6 +389,86 @@ def build_encrypted_numeric_field_bundle(lab_label: str, body: dict) -> dict | N
     if not values:
         return None
     return build_encrypted_numeric_vector_payload(lab_label, values)
+
+
+def get_latest_upload_record(lab_label: str) -> dict | None:
+    try:
+        updates = (
+            sb()
+            .table('fl_client_updates')
+            .select('*')
+            .eq('client_label', lab_label)
+            .order('created_at', desc=True)
+            .limit(1)
+            .execute()
+        )
+        return updates.data[0] if updates.data else None
+    except Exception as e:
+        print(f"Error getting latest local upload record for {lab_label}: {e}")
+        return None
+
+
+def get_latest_download_record(lab_label: str) -> dict | None:
+    try:
+        downloads = (
+            sb()
+            .table('fl_model_downloads')
+            .select('*')
+            .eq('lab_label', lab_label)
+            .order('downloaded_at', desc=True)
+            .limit(1)
+            .execute()
+        )
+        return downloads.data[0] if downloads.data else None
+    except Exception as e:
+        if 'does not exist' not in str(e):
+            print(f"Error getting latest download record for {lab_label}: {e}")
+        return None
+
+
+def get_lab_local_accuracy_snapshot(lab_label: str) -> dict:
+    """
+    Return the best-known local accuracy for the model the lab is currently using.
+    Downloaded-global metrics take precedence when they are at least as recent as uploads.
+    """
+    upload = get_latest_upload_record(lab_label)
+    download = get_latest_download_record(lab_label)
+
+    upload_round = int(upload.get('round') or 0) if upload else 0
+    download_version = int(download.get('global_model_version') or 0) if download else 0
+
+    if download and download_version >= upload_round:
+        accuracy = download.get('accuracy_after_download')
+        if accuracy is None:
+            accuracy = download.get('node_accuracy')
+        return {
+            'local_test_accuracy': float(accuracy) if accuracy is not None else None,
+            'accuracy_source': 'downloaded_global',
+            'version': download_version,
+            'updated_at': download.get('downloaded_at'),
+            'upload_record': upload,
+            'download_record': download,
+        }
+
+    if upload:
+        accuracy = upload.get('local_accuracy')
+        return {
+            'local_test_accuracy': float(accuracy) if accuracy is not None else None,
+            'accuracy_source': 'local_upload',
+            'version': upload_round,
+            'updated_at': upload.get('created_at'),
+            'upload_record': upload,
+            'download_record': download,
+        }
+
+    return {
+        'local_test_accuracy': None,
+        'accuracy_source': None,
+        'version': None,
+        'updated_at': None,
+        'upload_record': None,
+        'download_record': download,
+    }
 
 
 def get_lab_node_accuracy(lab_label: str) -> float | None:
@@ -325,25 +488,8 @@ def get_lab_node_accuracy(lab_label: str) -> float | None:
     Returns:
         float: Node accuracy (0.0 to 1.0) or None if not available
     """
-    # First try to get from downloads (may have node_accuracy column)
-    try:
-        downloads = sb().table('fl_model_downloads').select('node_accuracy, downloaded_at').eq('lab_label', lab_label).order('downloaded_at', desc=True).limit(1).execute()
-        if downloads.data and downloads.data[0].get('node_accuracy') is not None:
-            return float(downloads.data[0]['node_accuracy'])
-    except Exception as e:
-        # node_accuracy column might not exist yet - that's okay
-        if 'node_accuracy does not exist' not in str(e):
-            print(f"Error checking fl_model_downloads for {lab_label}: {e}")
-    
-    # Fallback to the lab's last training accuracy from fl_client_updates
-    try:
-        updates = sb().table('fl_client_updates').select('local_accuracy, created_at').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
-        if updates.data and updates.data[0].get('local_accuracy') is not None:
-            return float(updates.data[0]['local_accuracy'])
-    except Exception as e:
-        print(f"Error getting local_accuracy for {lab_label}: {e}")
-    
-    return None
+    snapshot = get_lab_local_accuracy_snapshot(lab_label)
+    return snapshot['local_test_accuracy']
 
 
 def get_lab_local_test_accuracy(lab_label: str) -> float | None:
@@ -389,8 +535,7 @@ def set_lab_local_test_accuracy(lab_label: str, accuracy: float, source: str = '
 def get_lab_current_model(lab_label: str):
     """
     Get the current model for a lab with priority:
-    1. Latest downloaded global model
-    2. Lab's local model
+    1. Newest of downloaded global model or local model
     3. Baseline model
     4. None (will fall back to rule-based)
     
@@ -402,32 +547,29 @@ def get_lab_current_model(lab_label: str):
     # Check for downloaded global models (use the most recent one)
     global_pattern = os.path.join(base, 'models', f'global_downloaded_{lab_label}_*.pkl')
     global_models = glob.glob(global_pattern)
-    
-    if global_models:
-        # Use the most recent global model
-        latest_global = max(global_models, key=os.path.getmtime)
-        try:
-            with open(latest_global, 'rb') as f:
-                model = pickle.load(f)
-                if not is_supported_fl_model(model):
-                    raise ValueError(f"Unsupported stale prediction model type: {type(model).__name__}")
-                print(f"Using downloaded global model for {lab_label}: {os.path.basename(latest_global)}")
-                return model, 'global'
-        except Exception as e:
-            print(f"Error loading global model: {e}, falling back to local model")
-    
-    # Check for lab's local model
     local_path = os.path.join(base, 'models', f'{lab_label}.pkl')
+    latest_global = max(global_models, key=os.path.getmtime) if global_models else None
+    candidates = []
+    if latest_global:
+        candidates.append(('global', latest_global, os.path.getmtime(latest_global)))
     if os.path.exists(local_path):
+        candidates.append(('local', local_path, os.path.getmtime(local_path)))
+
+    candidates.sort(key=lambda item: item[2], reverse=True)
+
+    for model_source, model_path, _ in candidates:
         try:
-            with open(local_path, 'rb') as f:
+            with open(model_path, 'rb') as f:
                 model = pickle.load(f)
-                if not is_supported_fl_model(model):
-                    raise ValueError(f"Unsupported stale prediction model type: {type(model).__name__}")
+            if not is_supported_fl_model(model):
+                raise ValueError(f"Unsupported stale prediction model type: {type(model).__name__}")
+            if model_source == 'global':
+                print(f"Using downloaded global model for {lab_label}: {os.path.basename(model_path)}")
+            else:
                 print(f"Using local model for {lab_label}")
-                return model, 'local'
+            return model, model_source
         except Exception as e:
-            print(f"Error loading local model: {e}, falling back to baseline")
+            print(f"Error loading {model_source} model: {e}, trying next candidate")
     
     # Check for baseline model
     baseline_path = os.path.join(base, 'models', 'baseline_global_model.pkl')
@@ -466,6 +608,8 @@ def predict_with_lab_model(lab_label: str, patient_data: dict) -> dict:
     try:
         # Encode features
         X, _ = encode_clinical_features(patient_data)
+        if model_source in {'global', 'local'} and is_supported_fl_model(model):
+            X = transform_fl_features(X)
         
         # Ensure X matches model's expected features
         X = ensure_features_for_model(X, model)
@@ -1332,8 +1476,10 @@ def send_model_update():
         X_train_raw, X_test_raw, y_train, y_test = get_lab_dataset_split(lab_label)
 
         current_model = load_or_init_model(lab_label, X_train_raw.shape[1])
-        X_train = ensure_features_for_model(X_train_raw, current_model)
-        X_test = ensure_features_for_model(X_test_raw, current_model)
+        X_train = transform_fl_features(X_train_raw)
+        X_test = transform_fl_features(X_test_raw)
+        X_train = ensure_features_for_model(X_train, current_model)
+        X_test = ensure_features_for_model(X_test, current_model)
         prev_coef, prev_intercept = get_parameters(current_model)
 
         model = create_fl_logistic_model(X_train.shape[1])
@@ -1588,6 +1734,10 @@ def aggregate_models():
             aggregate_input_payloads.append(payload)
 
         encrypted_global_payload = aggregate_encrypted_weight_payloads(aggregate_input_payloads)
+        global_validation_accuracy, _ = evaluate_encrypted_global_payload_for_lab(
+            encrypted_global_payload,
+            evaluator_lab=GLOBAL_EVALUATION_LAB,
+        )
         print("Aggregation complete. Server never held plaintext weights.")
 
         timestamp = int(time.time())
@@ -1652,7 +1802,7 @@ def aggregate_models():
         sb().table('fl_round_metrics').insert({
             'run_id': run_id,
             'round': version,
-            'global_accuracy': None,
+            'global_accuracy': global_validation_accuracy,
             'aggregated_grad_norm': 0.0,
         }).execute()
 
@@ -1678,8 +1828,8 @@ def aggregate_models():
         return jsonify({
             'success': True,
             'modelVersion': version,
-            'globalValidationAccuracy': None,
-            'globalAccuracy': None,
+            'globalValidationAccuracy': global_validation_accuracy,
+            'globalAccuracy': global_validation_accuracy,
             'storage_path': global_storage_path,
             'num_models_aggregated': len(models_data),
             'total_samples': int(sum(data['num_examples'] for data in models_data)),
@@ -1702,7 +1852,11 @@ def aggregate_models():
             },
             'skipped_incompatible_context_labs': skipped_context_labs,
             'round': version,
-            'message': 'Encrypted aggregation complete. Waiting for a lab-side evaluator to report Global Validation Accuracy.',
+            'evaluated_by_lab': GLOBAL_EVALUATION_LAB,
+            'message': (
+                f'Encrypted aggregation complete. Global Validation Accuracy was '
+                f'evaluated immediately by {GLOBAL_EVALUATION_LAB}.'
+            ),
         })
     except Exception as e:
         print(f"Error in aggregate_models: {e}")
@@ -1720,11 +1874,24 @@ def get_aggregation_status():
 
         client_updates = sb().table('fl_client_updates').select('*').not_.is_('storage_path', 'null').order('created_at', desc=True).execute()
 
-        lab_status = {}
+        lab_status = {
+            lab: {
+                'lab': lab,
+                'last_update': None,
+                'local_test_accuracy': None,
+                'local_accuracy': None,
+                'num_examples': 0,
+                'effective_samples': 0,
+                'approval_rate': None,
+                'has_model': False,
+                'ready_for_aggregation': False,
+            }
+            for lab in DEMO_LAB_PARTITION_MANIFEST.keys()
+        }
         if client_updates.data:
             for update in client_updates.data:
                 lab = update.get('client_label', 'unknown')
-                if lab not in lab_status:
+                if lab in lab_status and not lab_status[lab]['has_model']:
                     agreement_info = get_lab_agreement_rate(lab)
                     lab_status[lab] = {
                         'lab': lab,
@@ -1757,7 +1924,7 @@ def get_aggregation_status():
             },
             'labs': list(lab_status.values()),
             'recent_rounds': round_metrics.data if round_metrics.data else [],
-            'total_labs': len(lab_status),
+            'total_labs': len(DEMO_LAB_PARTITION_MANIFEST),
             'ready_labs': sum(1 for lab in lab_status.values() if lab['ready_for_aggregation']),
         })
     except Exception as e:
@@ -1835,18 +2002,20 @@ def get_global_model_info():
         latest_global = global_model_result.data[0]
 
         has_downloaded = False
+        latest_download = get_latest_download_record(lab_label)
         try:
             download_check = sb().table('fl_model_downloads').select('*').eq('lab_label', lab_label).eq('global_model_version', latest_global['version']).execute()
             has_downloaded = len(download_check.data) > 0 if download_check.data else False
         except Exception as e:
             print(f"fl_model_downloads table not found (optional): {e}")
 
-        lab_update = sb().table('fl_client_updates').select('*').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
-        local_version = None
-        local_test_accuracy = None
-        if lab_update.data:
-            local_test_accuracy = lab_update.data[0].get('local_accuracy')
-            local_version = lab_update.data[0].get('round', 0)
+        local_snapshot = get_lab_local_accuracy_snapshot(lab_label)
+        latest_upload = local_snapshot.get('upload_record')
+        downloaded_local_test_accuracy = None
+        if latest_download:
+            downloaded_local_test_accuracy = latest_download.get('accuracy_after_download')
+            if downloaded_local_test_accuracy is None:
+                downloaded_local_test_accuracy = latest_download.get('node_accuracy')
 
         latest_round = sb().table('fl_round_metrics').select('*').order('round', desc=True).limit(1).execute()
         current_global_validation_accuracy = latest_round.data[0].get('global_accuracy') if latest_round.data else None
@@ -1861,11 +2030,16 @@ def get_global_model_info():
                 'global_validation_accuracy': current_global_validation_accuracy,
             },
             'local_model': {
-                'version': local_version,
-                'local_test_accuracy': local_test_accuracy,
-                'accuracy': local_test_accuracy,
+                'version': local_snapshot.get('version'),
+                'local_test_accuracy': local_snapshot.get('local_test_accuracy'),
+                'accuracy': local_snapshot.get('local_test_accuracy'),
+                'accuracy_source': local_snapshot.get('accuracy_source'),
+                'uploaded_local_test_accuracy': latest_upload.get('local_accuracy') if latest_upload else None,
+                'downloaded_local_test_accuracy': downloaded_local_test_accuracy,
             },
-            'local_test_accuracy': local_test_accuracy,
+            'local_test_accuracy': local_snapshot.get('local_test_accuracy'),
+            'uploaded_local_test_accuracy': latest_upload.get('local_accuracy') if latest_upload else None,
+            'downloaded_local_test_accuracy': downloaded_local_test_accuracy,
             'needs_update': not has_downloaded,
             'has_downloaded': has_downloaded
         })
@@ -1930,7 +2104,8 @@ def get_current_model_info():
         lab_label = normalize_lab_label(raw_lab_label)
         
         model, model_source = get_lab_current_model(lab_label)
-        local_test_accuracy = get_lab_local_test_accuracy(lab_label)
+        local_snapshot = get_lab_local_accuracy_snapshot(lab_label)
+        local_test_accuracy = local_snapshot.get('local_test_accuracy')
 
         model_version = None
         last_updated = None
@@ -1957,6 +2132,7 @@ def get_current_model_info():
             'current_model_version': model_version,
             'current_model_accuracy': local_test_accuracy,
             'local_test_accuracy': local_test_accuracy,
+            'accuracy_source': local_snapshot.get('accuracy_source'),
             'current_model_accuracy_percent': (
                 f"{local_test_accuracy * 100:.1f}%"
                 if local_test_accuracy is not None
@@ -1989,9 +2165,9 @@ def download_global_model():
         lab_label = normalize_lab_label(raw_lab_label)
         
         print(f"Lab {lab_label} requesting global model download")
-        
-        lab_update = sb().table('fl_client_updates').select('*').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
-        accuracy_before = lab_update.data[0].get('local_accuracy') if lab_update.data else None
+
+        local_snapshot = get_lab_local_accuracy_snapshot(lab_label)
+        accuracy_before = local_snapshot.get('local_test_accuracy')
         global_model_result = sb().table('fl_global_models').select('*').order('version', desc=True).limit(1).execute()
         if not global_model_result.data:
             return jsonify({'error': 'No global model available yet'}), 404
@@ -2024,37 +2200,27 @@ def download_global_model():
                 print("WARNING: CKKS approximation error exceeded 1e-4")
 
             X_train_raw, X_test_raw, _, y_test = get_lab_dataset_split(lab_label)
-            X_test = ensure_features_for_model(X_test_raw, model)
-            local_test_accuracy = evaluate_model_accuracy(model, X_test, y_test)
+            local_test_accuracy = evaluate_model_accuracy(model, X_test_raw, y_test)
             if local_test_accuracy is None:
                 return jsonify({'error': 'Failed to re-evaluate downloaded global weights on the lab test split'}), 500
+            print(f"Updated {lab_label} Local Test Accuracy to {local_test_accuracy:.1%} after distributing global weights")
 
             try:
-                last_round = sb().table('fl_client_updates').select('round').eq('client_label', lab_label).order('created_at', desc=True).limit(1).execute()
-                round_num = int(last_round.data[0]['round']) + 1 if last_round.data else latest_global['version']
-            except Exception:
-                round_num = latest_global['version']
-
-            try:
-                sb().table('fl_client_updates').insert({
-                    'client_label': lab_label,
-                    'local_accuracy': local_test_accuracy,
-                    'num_examples': int(X_train_raw.shape[0]),
-                    'round': round_num,
-                    'storage_path': storage_path,
-                    'created_at': time.strftime('%Y-%m-%dT%H:%M:%SZ'),
-                }).execute()
-                print(f"Updated {lab_label} Local Test Accuracy to {local_test_accuracy:.1%} after distributing global weights")
-            except Exception as acc_err:
-                print(f"Warning: Could not update Local Test Accuracy in fl_client_updates: {acc_err}")
-
-            try:
+                improvement = None
+                improvement_percentage = None
+                if accuracy_before is not None:
+                    improvement = local_test_accuracy - accuracy_before
+                    if accuracy_before != 0:
+                        improvement_percentage = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100
                 download_record = {
                     'lab_label': lab_label,
                     'global_model_version': latest_global['version'],
                     'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'storage_path': storage_path,
                     'accuracy_before_download': accuracy_before,
                     'accuracy_after_download': local_test_accuracy,
+                    'improvement': improvement,
+                    'improvement_percentage': improvement_percentage,
                     'node_accuracy': local_test_accuracy,
                 }
                 sb().table('fl_model_downloads').upsert(
@@ -2062,35 +2228,24 @@ def download_global_model():
                     on_conflict='lab_label,global_model_version'
                 ).execute()
                 print(f"Download tracked for {lab_label}, version {latest_global['version']}")
-                if accuracy_before and local_test_accuracy:
+                if accuracy_before not in (None, 0):
                     improvement = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100
                     print(f"  Local Test Accuracy improvement: {accuracy_before:.1%} → {local_test_accuracy:.1%} ({improvement:+.2f}%)")
             except Exception as track_error:
                 print(f"Warning: Could not track download: {track_error}")
 
             improvement_metrics = None
-            if accuracy_before and local_test_accuracy:
-                improvement = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100
+            if accuracy_before is not None:
+                improvement = ((local_test_accuracy - accuracy_before) / accuracy_before) * 100 if accuracy_before != 0 else None
                 improvement_metrics = {
                     'accuracy_before': accuracy_before,
                     'accuracy_after': local_test_accuracy,
-                    'improvement_percentage': round(improvement, 2),
+                    'improvement_percentage': round(improvement, 2) if improvement is not None else None,
                     'absolute_improvement': round(local_test_accuracy - accuracy_before, 4)
                 }
 
             round_metric = sb().table('fl_round_metrics').select('global_accuracy').eq('round', latest_global['version']).limit(1).execute()
             global_validation_accuracy = round_metric.data[0].get('global_accuracy') if round_metric.data else None
-            if global_validation_accuracy is None:
-                X_val, y_val = load_validation_dataset()
-                if X_val is not None and y_val is not None:
-                    X_val = ensure_features_for_model(X_val, model)
-                    global_validation_accuracy = evaluate_model_accuracy(model, X_val, y_val)
-                    try:
-                        sb().table('fl_round_metrics').update({
-                            'global_accuracy': global_validation_accuracy
-                        }).eq('round', latest_global['version']).execute()
-                    except Exception as metric_err:
-                        print(f"Warning: unable to persist lab-reported Global Validation Accuracy: {metric_err}")
 
             return jsonify({
                 'success': True,
@@ -2102,6 +2257,7 @@ def download_global_model():
                     'local_path': local_model_path,
                     'global_validation_accuracy': global_validation_accuracy,
                 },
+                'previous_local_test_accuracy': accuracy_before,
                 'local_test_accuracy': local_test_accuracy,
                 'node_accuracy': local_test_accuracy,
                 'improvement_metrics': improvement_metrics,

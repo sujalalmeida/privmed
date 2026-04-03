@@ -233,6 +233,9 @@ export default function ModelAggregation() {
               Secure Aggregation: All model updates are homomorphically encrypted. Aggregation is performed on encrypted weights.
             </p>
           </div>
+          <p className="text-xs text-blue-700 mt-2">
+            FedAvg uses each lab&apos;s training sample count only as the weighting coefficient for encrypted weight averaging. The samples themselves are never uploaded during aggregation.
+          </p>
         </div>
 
         {error && (
@@ -411,19 +414,41 @@ export default function ModelAggregation() {
               <h4 className="text-xs font-semibold text-neutral-500 uppercase tracking-wide mb-3">Lab Contributions</h4>
               <div className="space-y-2">
                 {lastResult.lab_contributions.map((contrib) => (
-                  <div key={contrib.lab} className="flex items-center justify-between p-2 bg-neutral-50 rounded-md">
-                    <div className="flex items-center">
-                      <div className="w-2 h-2 bg-primary-500 rounded-full mr-2"></div>
-                      <span className="text-sm font-medium text-neutral-900">{contrib.lab}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="text-neutral-500">{contrib.samples} train samples</span>
-                      {contrib.doctor_weight_multiplier && contrib.doctor_weight_multiplier > 1 ? (
-                        <span className="text-success-600 font-medium">{contrib.doctor_weight_multiplier.toFixed(1)}x doctor modifier</span>
-                      ) : null}
+                  <div key={contrib.lab} className="p-3 bg-neutral-50 rounded-md border border-neutral-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="w-2 h-2 bg-primary-500 rounded-full mr-2"></div>
+                        <span className="text-sm font-medium text-neutral-900">{contrib.lab}</span>
+                      </div>
                       <span className="font-medium text-primary-500">
-                        {(contrib.weight * 100).toFixed(1)}% weight
+                        {(contrib.weight * 100).toFixed(1)}% aggregation weight
                       </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-neutral-500">Raw train samples:</span>{' '}
+                        <span className="font-medium text-neutral-900">{contrib.samples}</span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Effective samples:</span>{' '}
+                        <span className="font-medium text-neutral-900">
+                          {contrib.effective_samples ?? contrib.samples}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Doctor approval:</span>{' '}
+                        <span className="font-medium text-neutral-900">
+                          {contrib.approval_rate !== undefined && contrib.approval_rate !== null
+                            ? `${(contrib.approval_rate * 100).toFixed(1)}%`
+                            : 'N/A'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-neutral-500">Weight multiplier:</span>{' '}
+                        <span className={contrib.doctor_weight_multiplier && contrib.doctor_weight_multiplier > 1 ? 'font-medium text-success-600' : 'font-medium text-neutral-900'}>
+                          {(contrib.doctor_weight_multiplier ?? 1).toFixed(1)}x
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ))}
